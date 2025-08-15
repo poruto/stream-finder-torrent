@@ -428,12 +428,6 @@ class TorrentSearcher:
             try:
                 results = provider.search(query)
                 all_results.extend(results)
-
-                # For movies, if YTS returns results, use only those
-                if query.media_type == MediaType.MOVIE and provider_name == 'yts' and results:
-                    logger.info("🎬 Using YTS results for movie")
-                    break
-
             except TorrentProviderError as e:
                 logger.warning(f"Provider {provider_name} failed: {e}")
                 continue
