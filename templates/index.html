@@ -165,47 +165,36 @@
   {% endfor %}
 </div>
 
-<!-- Pagination -->
+
 {% if total_pages > 1 %}
-  <div class="pagination">
-    {% if current_page > 1 %}
-      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + (current_page-1)|string) }}">‹ Předchozí</a>
+<div class="pagination">
+  <div class="pagination-info">
+    Stránka {{ current_page or 1 }} z {{ total_pages }}
+  </div>
+
+  <div class="pagination-controls">
+    {% if current_page and current_page > 1 %}
+      <a href="{{ request.url | replace('&page=' + (current_page|string), '') | replace('page=' + (current_page|string), '') }}&page={{ current_page - 1 }}"
+         class="pagination-btn">← Předchozí</a>
     {% endif %}
 
-    {% set start_page = [1, current_page - 2] | max %}
-    {% set end_page = [total_pages, current_page + 2] | min %}
-
-    {% if start_page > 1 %}
-      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=1') }}">1</a>
-      {% if start_page > 2 %}<span>...</span>{% endif %}
-    {% endif %}
-
-    {% for page_num in range(start_page, end_page + 1) %}
-      {% if page_num == current_page %}
-        <span class="current">{{ page_num }}</span>
+    {% set max_page = 5 if total_pages > 5 else total_pages %}
+    {% for page_num in range(1, max_page + 1) %}
+      {% if page_num == (current_page or 1) %}
+        <span class="pagination-btn active">{{ page_num }}</span>
       {% else %}
-        <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + page_num|string) }}">{{ page_num }}</a>
+        <a href="{{ request.url | replace('&page=' + ((current_page or 1)|string), '') | replace('page=' + ((current_page or 1)|string), '') }}&page={{ page_num }}"
+           class="pagination-btn">{{ page_num }}</a>
       {% endif %}
     {% endfor %}
 
-    {% if end_page < total_pages %}
-      {% if end_page < total_pages - 1 %}<span>...</span>{% endif %}
-      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + total_pages|string) }}">{{ total_pages }}</a>
-    {% endif %}
-
-    {% if current_page < total_pages %}
-      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + (current_page+1)|string) }}">Další ›</a>
+    {% if not current_page or current_page < total_pages %}
+      <a href="{{ request.url | replace('&page=' + ((current_page or 1)|string), '') | replace('page=' + ((current_page or 1)|string), '') }}&page={{ (current_page or 1) + 1 }}"
+         class="pagination-btn">Další →</a>
     {% endif %}
   </div>
-
-  <div style="text-align: center; margin: 1rem 0; color: rgba(255,255,255,0.7);">
-    Stránka {{ current_page }} z {{ total_pages }}
-    {% if items|length > 0 %}
-      ({{ ((current_page-1) * 20 + 1) }}-{{ ((current_page-1) * 20 + items|length) }} výsledků)
-    {% endif %}
-  </div>
+</div>
 {% endif %}
-
 <script>
 function toggleAdvancedFilters() {
   const content = document.getElementById('advanced-filters');
