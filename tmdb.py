@@ -374,3 +374,9 @@ def format_rating(rating: Optional[float]) -> str:
 
 def get_genre_name(genre_id: int, media_type: str = "movie") -> str:
     return tmdb_client.get_genre_name(genre_id, media_type)
+
+def tmdb_profile_image(profile_path: str, size: str = "w185") -> str:
+    """Generate TMDB profile image URL."""
+    if not profile_path:
+        return ""
+    return f"https://image.tmdb.org/t/p/{size}{profile_path}"
