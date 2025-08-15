@@ -165,7 +165,6 @@
   {% endfor %}
 </div>
 
-
 {% if total_pages > 1 %}
 <div class="pagination">
   <div class="pagination-info">
@@ -173,23 +172,47 @@
   </div>
 
   <div class="pagination-controls">
+    <!-- Předchozí stránka -->
     {% if current_page and current_page > 1 %}
       <a href="{{ request.url | replace('&page=' + (current_page|string), '') | replace('page=' + (current_page|string), '') }}&page={{ current_page - 1 }}"
          class="pagination-btn">← Předchozí</a>
     {% endif %}
 
-    {% set max_page = 5 if total_pages > 5 else total_pages %}
-    {% for page_num in range(1, max_page + 1) %}
-      {% if page_num == (current_page or 1) %}
+    <!-- Logika pro zobrazení stránek -->
+    {% set current = current_page or 1 %}
+    {% set total = total_pages %}
+
+    <!-- Vždy zobrazit první stránku -->
+    {% if current > 3 %}
+      <a href="{{ request.url | replace('&page=' + (current|string), '') | replace('page=' + (current|string), '') }}&page=1"
+         class="pagination-btn">1</a>
+      {% if current > 4 %}
+        <span class="pagination-ellipsis">...</span>
+      {% endif %}
+    {% endif %}
+
+    <!-- Zobrazit stránky kolem aktuální -->
+    {% for page_num in range([1, current - 2]|max, [total + 1, current + 3]|min) %}
+      {% if page_num == current %}
         <span class="pagination-btn active">{{ page_num }}</span>
       {% else %}
-        <a href="{{ request.url | replace('&page=' + ((current_page or 1)|string), '') | replace('page=' + ((current_page or 1)|string), '') }}&page={{ page_num }}"
+        <a href="{{ request.url | replace('&page=' + (current|string), '') | replace('page=' + (current|string), '') }}&page={{ page_num }}"
            class="pagination-btn">{{ page_num }}</a>
       {% endif %}
     {% endfor %}
 
-    {% if not current_page or current_page < total_pages %}
-      <a href="{{ request.url | replace('&page=' + ((current_page or 1)|string), '') | replace('page=' + ((current_page or 1)|string), '') }}&page={{ (current_page or 1) + 1 }}"
+    <!-- Vždy zobrazit poslední stránku -->
+    {% if current < total - 2 %}
+      {% if current < total - 3 %}
+        <span class="pagination-ellipsis">...</span>
+      {% endif %}
+      <a href="{{ request.url | replace('&page=' + (current|string), '') | replace('page=' + (current|string), '') }}&page={{ total }}"
+         class="pagination-btn">{{ total }}</a>
+    {% endif %}
+
+    <!-- Další stránka -->
+    {% if current < total %}
+      <a href="{{ request.url | replace('&page=' + (current|string), '') | replace('page=' + (current|string), '') }}&page={{ current + 1 }}"
          class="pagination-btn">Další →</a>
     {% endif %}
   </div>
