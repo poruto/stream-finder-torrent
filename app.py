@@ -12,7 +12,7 @@ from tmdb import (
     imdb_url_from_tmdb_movie, discover_movies, discover_tv,
     get_movie_genres, get_tv_genres, get_trending, get_popular_movies,
     get_popular_tv, get_top_rated_movies, get_top_rated_tv,
-    get_now_playing_movies, get_upcoming_movies, format_rating
+    get_now_playing_movies, get_upcoming_movies, format_rating, tmdb_profile_image, tmdb_client
 )
 from torrent_search import TorrentSearcher
 from config import TORRSERVER_URL, TORRSERVER_STREAM_PATH
@@ -427,12 +427,38 @@ def tracker_status():
 
 def _render_title_template(data: Dict[str, Any], media_type: str, tmdb_id: int, **kwargs) -> str:
     """Render title template with common data."""
+
+    # Získáme detailní informace včetně credits
+    detailed_data = tmdb_client.get_movie(tmdb_id) if media_type == 'movie' else tmdb_client.get_tv(tmdb_id)
+
+    # Přidáme informace o profilech herců
+    cast_with_images = []
+    for actor in detailed_data.get('credits', {}).get('cast', [])[:12]:  # Zvýšíme na 12
+        cast_with_images.append({
+            'name': actor.get('name', ''),
+            'character': actor.get('character', ''),
+            'profile_path': tmdb_profile_image(actor.get('profile_path')),
+            'id': actor.get('id')
+        })
+
+    # Přidáme informace o profilech štábu
+    crew_with_images = []
+    for member in detailed_data.get('credits', {}).get('crew', [])[:8]:  # Zvýšíme na 8
+        crew_with_images.append({
+            'name': member.get('name', ''),
+            'job': member.get('job', ''),
+            'department': member.get('department', ''),
+            'profile_path': tmdb_profile_image(member.get('profile_path')),
+            'id': member.get('id')
+        })
+
     template_data = {
         'title': data.get('title') or data.get('name'),
         'english_title': data.get('original_title') or data.get('original_name'),
         'year': (data.get('release_date') or data.get('first_air_date', ''))[:4],
         'overview': data.get('overview'),
         'poster': tmdb_poster(data.get('poster_path')),
+        'backdrop': tmdb_poster(data.get('backdrop_path'), size="w1280") if data.get('backdrop_path') else None,
         'tmdb_id': tmdb_id,
         'media_type': media_type,
         'seasons': data.get('seasons') if media_type == 'tv' else None,
@@ -440,8 +466,31 @@ def _render_title_template(data: Dict[str, Any], media_type: str, tmdb_id: int, 
         'rating': data.get('vote_average'),
         'rating_formatted': format_rating(data.get('vote_average')),
         'genres': data.get('genres', []),
-        'cast': data.get('credits', {}).get('cast', [])[:10],
-        'crew': data.get('credits', {}).get('crew', [])[:5]
+        'cast': cast_with_images,  # Nyní s fotkami
+        'crew': crew_with_images,  # Nyní s fotkami
+
+        # Ostatní informace...
+        'runtime': data.get('runtime'),
+        'status': data.get('status'),
+        'tagline': data.get('tagline'),
+        'budget': data.get('budget'),
+        'revenue': data.get('revenue'),
+        'production_companies': data.get('production_companies', [])[:3],
+        'production_countries': data.get('production_countries', [])[:3],
+        'spoken_languages': data.get('spoken_languages', [])[:3],
+        'vote_count': data.get('vote_count'),
+        'popularity': data.get('popularity'),
+        'adult': data.get('adult'),
+
+        # Pro seriály:
+        'episode_run_time': data.get('episode_run_time', []),
+        'number_of_seasons': data.get('number_of_seasons'),
+        'number_of_episodes': data.get('number_of_episodes'),
+        'in_production': data.get('in_production'),
+        'networks': data.get('networks', [])[:3],
+        'created_by': data.get('created_by', [])[:3],
+        'last_air_date': data.get('last_air_date'),
+        'next_episode_to_air': data.get('next_episode_to_air'),
     }
     template_data.update(kwargs)
 
