@@ -1,114 +1,368 @@
-
 <!DOCTYPE html>
 <html lang="cs">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="{% block description %}Najdi a sleduj filmy a seriály přes torrent streaming. TMDB databáze, TorrServer podpora.{% endblock %}">
+  <meta name="keywords" content="{% block keywords %}filmy, seriály, streaming, torrent, TMDB{% endblock %}">
+  <meta name="author" content="StreamFinder">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{% block og_title %}🎬 StreamFinder - Najdi a sleduj filmy a seriály{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}Najdi a sleduj filmy a seriály přes torrent streaming{% endblock %}">
+  <meta property="og:image" content="{% block og_image %}{{ url_for('static', filename='logo.png', _external=True) if url_for }}{% endblock %}">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:title" content="{% block twitter_title %}🎬 StreamFinder{% endblock %}">
+
   <title>{% block title %}🎬 StreamFinder - Najdi a sleduj filmy a seriály{% endblock %}</title>
+
+  <!-- Preload critical resources -->
+  <link rel="preload" href="{{ url_for('static', filename='style.css') }}" as="style">
+
+  <!-- Stylesheets -->
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <!-- Favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+
+  <!-- Theme color for mobile browsers -->
+  <meta name="theme-color" content="#1a1a1a">
+
+  <!-- Block for additional head content -->
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
-  <header>
+  <!-- Skip to main content for accessibility -->
+  <a href="#main-content" class="sr-only sr-only-focusable">Přejít na hlavní obsah</a>
+
+  <header role="banner">
     <div class="container">
       <div class="header-content">
-        <a href="{{ url_for('index') }}" class="logo">🎬 StreamFinder</a>
+        <a href="{{ url_for('index') }}" class="logo" aria-label="StreamFinder - Domovská stránka">
+          🎬 StreamFinder
+        </a>
 
-        <form class="search-form" method="GET" action="{{ url_for('index') }}">
+        <form class="search-form" method="GET" action="{{ url_for('index') }}" role="search" aria-label="Vyhledávání filmů a seriálů">
           <input type="hidden" name="category" value="search">
+          <label for="search-input" class="sr-only">Vyhledat filmy a seriály</label>
           <input
+            id="search-input"
             type="text"
             name="q"
             class="search-input"
             placeholder="Hledej filmy a seriály..."
-            value="{{ request.args.get('q', '') }}"
+            value="{{ request.args.get('q', '') | e }}"
+            autocomplete="off"
+            spellcheck="false"
+            aria-describedby="search-hint"
           >
-          <button type="submit" class="search-btn">🔍 Hledat</button>
+          <div id="search-hint" class="sr-only">Stiskni Ctrl+K pro rychlé zaměření</div>
+          <button type="submit" class="search-btn" aria-label="Spustit vyhledávání">
+            <span aria-hidden="true">🔍</span> Hledat
+          </button>
         </form>
 
-        <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7);">
-          <div id="torrserver-status">🔴 TorrServer offline</div>
+        <div class="server-status" role="status" aria-live="polite">
+          <div id="torrserver-status" aria-label="Stav TorrServer">
+            <span aria-hidden="true">🔴</span> TorrServer offline
+          </div>
         </div>
       </div>
     </div>
   </header>
 
-  <main class="container">
+  <main id="main-content" class="container" role="main">
     {% block content %}{% endblock %}
   </main>
 
-  <footer style="text-align: center; padding: 2rem 0; color: rgba(255,255,255,0.5); border-top: 1px solid rgba(255,255,255,0.1); margin-top: 3rem;">
-    <p>🎬 StreamFinder - Tvoje brána do světa filmů a seriálů</p>
-    <p style="font-size: 0.8rem; margin-top: 0.5rem;">
-      Data z TMDB • Torrenty z veřejných zdrojů • Open source projekt
-    </p>
+  <footer role="contentinfo">
+    <div class="container">
+      <div class="footer-content">
+        <p><span aria-hidden="true">🎬</span> StreamFinder - Tvoje brána do světa filmů a seriálů</p>
+        <p class="footer-credits">
+          Data z TMDB • Torrenty z veřejných zdrojů • Open source projekt
+        </p>
+
+        <!-- Optional links section -->
+        {% block footer_links %}{% endblock %}
+      </div>
+    </div>
   </footer>
 
+  <!-- Loading indicator for dynamic content -->
+  <div id="loading-indicator" class="loading-indicator" role="status" aria-hidden="true">
+    <div class="loading-spinner"></div>
+    <span class="loading-text">Načítám...</span>
+  </div>
+
+  <!-- Error notification container -->
+  <div id="notification-container" class="notification-container" role="alert" aria-live="assertive"></div>
+
+  <!-- Scripts -->
   <script>
-  // Check TorrServer status
-  async function checkTorrServerStatus() {
-    try {
-      const response = await fetch('/api/torrserver-status');
-      const data = await response.json();
-      const statusElement = document.getElementById('torrserver-status');
-
-      if (data.status === 'online') {
-        statusElement.innerHTML = '🟢 TorrServer online';
-        statusElement.style.color = '#28a745';
-      } else {
-        statusElement.innerHTML = '🔴 TorrServer offline';
-        statusElement.style.color = '#dc3545';
+    // Global app configuration
+    const APP_CONFIG = {
+      endpoints: {
+        torrserverStatus: '{{ url_for("torrserver_status") }}',
+        trackerStatus: '{{ url_for("tracker_status") }}'
+      },
+      intervals: {
+        statusCheck: 30000,
+        retryDelay: 5000
+      },
+      ui: {
+        searchSelector: '.search-input',
+        statusSelector: '#torrserver-status',
+        loadingSelector: '#loading-indicator',
+        notificationSelector: '#notification-container'
       }
-    } catch (error) {
-      const statusElement = document.getElementById('torrserver-status');
-      statusElement.innerHTML = '🔴 TorrServer offline';
-      statusElement.style.color = '#dc3545';
-    }
-  }
+    };
 
-  // Check status on load and every 30 seconds
-  document.addEventListener('DOMContentLoaded', checkTorrServerStatus);
-  setInterval(checkTorrServerStatus, 30000);
+    // Utility functions
+    const utils = {
+      // Debounce function for performance
+      debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+          const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      },
 
-  // Smooth scrolling for anchor links
-  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-    anchor.addEventListener('click', function (e) {
-      e.preventDefault();
-      document.querySelector(this.getAttribute('href')).scrollIntoView({
-        behavior: 'smooth'
-      });
+      // Show notification
+      showNotification(message, type = 'info', duration = 5000) {
+        const container = document.querySelector(APP_CONFIG.ui.notificationSelector);
+        if (!container) return;
+
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        notification.setAttribute('role', 'alert');
+
+        container.appendChild(notification);
+
+        // Auto remove
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, duration);
+      },
+
+      // Show/hide loading indicator
+      setLoading(show) {
+        const indicator = document.querySelector(APP_CONFIG.ui.loadingSelector);
+        if (indicator) {
+          indicator.style.display = show ? 'flex' : 'none';
+          indicator.setAttribute('aria-hidden', !show);
+        }
+      }
+    };
+
+    // TorrServer status management
+    const statusManager = {
+      retryCount: 0,
+      maxRetries: 3,
+
+      async checkTorrServerStatus() {
+        try {
+          const response = await fetch(APP_CONFIG.endpoints.torrserverStatus, {
+            method: 'GET',
+            cache: 'no-cache',
+            signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+          });
+
+          const data = await response.json();
+          this.updateStatusUI(data.status === 'online');
+          this.retryCount = 0; // Reset on success
+
+        } catch (error) {
+          console.warn('TorrServer status check failed:', error);
+          this.updateStatusUI(false);
+
+          // Retry logic
+          if (this.retryCount < this.maxRetries) {
+            this.retryCount++;
+            setTimeout(() => this.checkTorrServerStatus(), APP_CONFIG.intervals.retryDelay);
+          }
+        }
+      },
+
+      updateStatusUI(isOnline) {
+        const statusElement = document.querySelector(APP_CONFIG.ui.statusSelector);
+        if (!statusElement) return;
+
+        if (isOnline) {
+          statusElement.innerHTML = '<span aria-hidden="true">🟢</span> TorrServer online';
+          statusElement.style.color = '#28a745';
+          statusElement.setAttribute('aria-label', 'TorrServer je online');
+        } else {
+          statusElement.innerHTML = '<span aria-hidden="true">🔴</span> TorrServer offline';
+          statusElement.style.color = '#dc3545';
+          statusElement.setAttribute('aria-label', 'TorrServer je offline');
+        }
+      }
+    };
+
+    // Search functionality
+    const searchManager = {
+      init() {
+        const searchInput = document.querySelector(APP_CONFIG.ui.searchSelector);
+        if (!searchInput) return;
+
+        // Add keyboard shortcut hint on desktop
+        if (window.innerWidth > 768) {
+          searchInput.placeholder = 'Hledej filmy a seriály... (Ctrl+K)';
+        }
+
+        // Add search suggestions (could be expanded)
+        this.initSearchSuggestions(searchInput);
+      },
+
+      initSearchSuggestions(input) {
+        // Placeholder for future search suggestions functionality
+        input.addEventListener('input', utils.debounce((e) => {
+          // Future: implement search suggestions
+        }, 300));
+      }
+    };
+
+    // Keyboard shortcuts
+    const keyboardManager = {
+      init() {
+        document.addEventListener('keydown', (e) => {
+          // Ctrl/Cmd + K for search focus
+          if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            this.focusSearch();
+          }
+
+          // Escape to clear search or close modals
+          if (e.key === 'Escape') {
+            this.handleEscape();
+          }
+
+          // Arrow keys for navigation (future feature)
+          if (['ArrowUp', 'ArrowDown'].includes(e.key)) {
+            this.handleNavigation(e.key);
+          }
+        });
+      },
+
+      focusSearch() {
+        const searchInput = document.querySelector(APP_CONFIG.ui.searchSelector);
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+      },
+
+      handleEscape() {
+        const searchInput = document.querySelector(APP_CONFIG.ui.searchSelector);
+        if (searchInput && document.activeElement === searchInput) {
+          searchInput.value = '';
+        }
+      },
+
+      handleNavigation(direction) {
+        // Placeholder for future keyboard navigation
+        // console.log('Navigation:', direction);
+      }
+    };
+
+    // Smooth scrolling for anchor links
+    const navigationManager = {
+      init() {
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+          anchor.addEventListener('click', (e) => {
+            e.preventDefault();
+            const target = document.querySelector(anchor.getAttribute('href'));
+            if (target) {
+              target.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+              });
+            }
+          });
+        });
+      }
+    };
+
+    // Performance monitoring
+    const performanceManager = {
+      init() {
+        // Log page load time
+        window.addEventListener('load', () => {
+          const loadTime = performance.timing.loadEventEnd - performance.timing.navigationStart;
+          console.log(`Page loaded in ${loadTime}ms`);
+        });
+
+        // Monitor long tasks (if supported)
+        if ('PerformanceObserver' in window) {
+          try {
+            const observer = new PerformanceObserver((list) => {
+              for (const entry of list.getEntries()) {
+                if (entry.duration > 50) {
+                  console.warn('Long task detected:', entry);
+                }
+              }
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+          } catch (e) {
+            // PerformanceObserver not fully supported
+          }
+        }
+      }
+    };
+
+    // Initialize everything when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initialize all managers
+      statusManager.checkTorrServerStatus();
+      searchManager.init();
+      keyboardManager.init();
+      navigationManager.init();
+      performanceManager.init();
+
+      // Set up recurring status checks
+      setInterval(() => {
+        statusManager.checkTorrServerStatus();
+      }, APP_CONFIG.intervals.statusCheck);
+
+      // Announce page ready for screen readers
+      utils.showNotification('Stránka byla načtena', 'success', 2000);
     });
-  });
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', function(e) {
-    // Ctrl/Cmd + K for search focus
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-      e.preventDefault();
-      const searchInput = document.querySelector('.search-input');
-      if (searchInput) {
-        searchInput.focus();
-        searchInput.select();
+    // Handle page visibility changes
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        // Page became visible, check status
+        statusManager.checkTorrServerStatus();
       }
-    }
+    });
 
-    // Escape to clear search
-    if (e.key === 'Escape') {
-      const searchInput = document.querySelector('.search-input');
-      if (searchInput && document.activeElement === searchInput) {
-        searchInput.value = '';
-      }
-    }
-  });
+    // Global error handler
+    window.addEventListener('error', (e) => {
+      console.error('Global error:', e.error);
+      utils.showNotification('Došlo k neočekávané chybě', 'error');
+    });
 
-  // Show keyboard shortcut hint
-  const searchInput = document.querySelector('.search-input');
-  if (searchInput) {
-    // Add keyboard shortcut hint to placeholder on desktop
-    if (window.innerWidth > 768) {
-      searchInput.placeholder = 'Hledej filmy a seriály... (Ctrl+K)';
+    // Service worker registration (future feature)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // navigator.serviceWorker.register('/sw.js'); // Future implementation
+      });
     }
-  }
   </script>
+
+  <!-- Block for additional scripts -->
+  {% block extra_scripts %}{% endblock %}
 </body>
 </html>
