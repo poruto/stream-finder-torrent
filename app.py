@@ -5,7 +5,7 @@ import binascii
 from typing import Dict, List, Optional, Any, Union
 
 import requests
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file, abort
 
 from tmdb import (
     search_multi, get_movie, get_tv, get_tv_season, tmdb_poster,
@@ -16,9 +16,11 @@ from tmdb import (
 )
 from torrent_search import TorrentSearcher
 from config import TORRSERVER_URL, TORRSERVER_STREAM_PATH
+from subtitle_manager import SubtitleManager
 
 app = Flask(__name__)
 torrent_searcher = TorrentSearcher()
+subtitle_manager = SubtitleManager()
 
 MAGNET_RE = re.compile(r'magnet:\?xt=urn:btih:([a-fA-F0-9]{40}|[a-fA-F0-9]{32})')
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
@@ -425,6 +427,119 @@ def tracker_status():
         return jsonify({"error": str(e)})
 
 
+# === SUBTITLE API ENDPOINTS ===
+
+@app.route('/api/subtitles/search', methods=['POST'])
+def search_subtitles_api():
+    """API endpoint for subtitle search."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"})
+
+        # Parametry pro vyhledávání
+        imdb_id = data.get('imdb_id')
+        tmdb_id = data.get('tmdb_id')
+        query = data.get('query')
+        year = data.get('year')
+        season_number = data.get('season')
+        episode_number = data.get('episode')
+        languages = data.get('languages', subtitle_manager.languages)
+
+        # Vyhledej titulky
+        subtitles = subtitle_manager.search_subtitles(
+            imdb_id=imdb_id,
+            tmdb_id=tmdb_id,
+            query=query,
+            year=year,
+            season_number=season_number,
+            episode_number=episode_number,
+            languages=languages
+        )
+
+        # Převeď na JSON serializovatelný formát
+        subtitle_list = []
+        for subtitle in subtitles:
+            subtitle_list.append({
+                'id': subtitle.id,
+                'name': subtitle.name,
+                'language': subtitle.language,
+                'language_code': subtitle.language_code,
+                'download_count': subtitle.download_count,
+                'rating': subtitle.rating,
+                'format': subtitle.format,
+                'encoding': subtitle.encoding,
+                'file_size': subtitle.file_size,
+                'fps': subtitle.fps,
+                'release_info': subtitle.release_info,
+                'uploader': subtitle.uploader
+            })
+
+        return jsonify({
+            "success": True,
+            "subtitles": subtitle_list,
+            "count": len(subtitle_list)
+        })
+
+    except Exception as e:
+        print(f"Error in subtitle search API: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/subtitles/download', methods=['POST'])
+def download_subtitle_api():
+    """API endpoint for subtitle download."""
+    try:
+        data = request.get_json()
+        if not data or not data.get('subtitle_id'):
+            return jsonify({"success": False, "error": "Missing subtitle_id"})
+
+        subtitle_id = data.get('subtitle_id')
+
+        # Najdi titulky podle ID (zjednodušené - v reálné aplikaci byste si uložili informace o titulcích)
+        # Pro nyní vrátíme placeholder odpověď
+        return jsonify({
+            "success": True,
+            "download_url": f"/api/subtitles/file/{subtitle_id}",
+            "message": "Subtitle prepared for download"
+        })
+
+    except Exception as e:
+        print(f"Error in subtitle download API: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/subtitles/languages')
+def get_subtitle_languages():
+    """Get supported subtitle languages."""
+    try:
+        languages = subtitle_manager.get_supported_languages()
+        return jsonify({
+            "success": True,
+            "languages": languages,
+            "default_languages": subtitle_manager.languages
+        })
+    except Exception as e:
+        print(f"Error getting subtitle languages: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/static/subtitles/<filename>')
+def serve_subtitle_file(filename):
+    """Serve subtitle files."""
+    try:
+        subtitles_dir = os.path.join(app.root_path, 'static', 'subtitles')
+        file_path = os.path.join(subtitles_dir, filename)
+
+        if os.path.exists(file_path):
+            return send_file(file_path)
+        else:
+            abort(404)
+    except Exception as e:
+        print(f"Error serving subtitle file: {e}")
+        abort(500)
+
+
 def _render_title_template(data: Dict[str, Any], media_type: str, tmdb_id: int, **kwargs) -> str:
     """Render title template with common data."""
 
@@ -452,6 +567,10 @@ def _render_title_template(data: Dict[str, Any], media_type: str, tmdb_id: int, 
             'id': member.get('id')
         })
 
+    # Přidáme informace o titulcích
+    subtitles_enabled = subtitle_manager.is_enabled()
+    supported_languages = subtitle_manager.get_supported_languages() if subtitles_enabled else {}
+
     template_data = {
         'title': data.get('title') or data.get('name'),
         'english_title': data.get('original_title') or data.get('original_name'),
@@ -468,6 +587,10 @@ def _render_title_template(data: Dict[str, Any], media_type: str, tmdb_id: int, 
         'genres': data.get('genres', []),
         'cast': cast_with_images,  # Nyní s fotkami
         'crew': crew_with_images,  # Nyní s fotkami
+
+        # Informace o titulcích
+        'subtitles_enabled': subtitles_enabled,
+        'supported_languages': supported_languages,
 
         # Ostatní informace...
         'runtime': data.get('runtime'),
@@ -515,4 +638,8 @@ def _render_title_with_result(data: Dict[str, Any], media_type: str, tmdb_id: in
 
 
 if __name__ == '__main__':
+    # Vytvoř adresář pro titulky
+    import os
+    os.makedirs(os.path.join(app.root_path, 'static', 'subtitles'), exist_ok=True)
+
     app.run(debug=True)
