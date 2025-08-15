@@ -4,12 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4723c0d4-0e70-478a-91bb-df251609d191" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/torr/config.db" beforeDir="false" afterPath="$PROJECT_DIR$/torr/config.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/torr/viewed.json" beforeDir="false" afterPath="$PROJECT_DIR$/torr/viewed.json" afterDir="false" />
-    </list>
+    <list default="true" id="4723c0d4-0e70-478a-91bb-df251609d191" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
