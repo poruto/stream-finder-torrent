@@ -1,0 +1,114 @@
+
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}🎬 StreamFinder - Najdi a sleduj filmy a seriály{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-content">
+        <a href="{{ url_for('index') }}" class="logo">🎬 StreamFinder</a>
+
+        <form class="search-form" method="GET" action="{{ url_for('index') }}">
+          <input type="hidden" name="category" value="search">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder="Hledej filmy a seriály..."
+            value="{{ request.args.get('q', '') }}"
+          >
+          <button type="submit" class="search-btn">🔍 Hledat</button>
+        </form>
+
+        <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+          <div id="torrserver-status">🔴 TorrServer offline</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer style="text-align: center; padding: 2rem 0; color: rgba(255,255,255,0.5); border-top: 1px solid rgba(255,255,255,0.1); margin-top: 3rem;">
+    <p>🎬 StreamFinder - Tvoje brána do světa filmů a seriálů</p>
+    <p style="font-size: 0.8rem; margin-top: 0.5rem;">
+      Data z TMDB • Torrenty z veřejných zdrojů • Open source projekt
+    </p>
+  </footer>
+
+  <script>
+  // Check TorrServer status
+  async function checkTorrServerStatus() {
+    try {
+      const response = await fetch('/api/torrserver-status');
+      const data = await response.json();
+      const statusElement = document.getElementById('torrserver-status');
+
+      if (data.status === 'online') {
+        statusElement.innerHTML = '🟢 TorrServer online';
+        statusElement.style.color = '#28a745';
+      } else {
+        statusElement.innerHTML = '🔴 TorrServer offline';
+        statusElement.style.color = '#dc3545';
+      }
+    } catch (error) {
+      const statusElement = document.getElementById('torrserver-status');
+      statusElement.innerHTML = '🔴 TorrServer offline';
+      statusElement.style.color = '#dc3545';
+    }
+  }
+
+  // Check status on load and every 30 seconds
+  document.addEventListener('DOMContentLoaded', checkTorrServerStatus);
+  setInterval(checkTorrServerStatus, 30000);
+
+  // Smooth scrolling for anchor links
+  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function (e) {
+      e.preventDefault();
+      document.querySelector(this.getAttribute('href')).scrollIntoView({
+        behavior: 'smooth'
+      });
+    });
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', function(e) {
+    // Ctrl/Cmd + K for search focus
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      const searchInput = document.querySelector('.search-input');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+    }
+
+    // Escape to clear search
+    if (e.key === 'Escape') {
+      const searchInput = document.querySelector('.search-input');
+      if (searchInput && document.activeElement === searchInput) {
+        searchInput.value = '';
+      }
+    }
+  });
+
+  // Show keyboard shortcut hint
+  const searchInput = document.querySelector('.search-input');
+  if (searchInput) {
+    // Add keyboard shortcut hint to placeholder on desktop
+    if (window.innerWidth > 768) {
+      searchInput.placeholder = 'Hledej filmy a seriály... (Ctrl+K)';
+    }
+  }
+  </script>
+</body>
+</html>

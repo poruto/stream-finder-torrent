@@ -1,0 +1,220 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Kategorie navigace -->
+<div class="nav-categories">
+  <a href="?category=search&q={{ q }}" class="nav-link {% if category == 'search' %}active{% endif %}">🔍 Hledání</a>
+  <a href="?category=trending&media_type=all&time_window=week" class="nav-link {% if category == 'trending' %}active{% endif %}">🔥 Trendy</a>
+  <a href="?category=popular_movies" class="nav-link {% if category == 'popular_movies' %}active{% endif %}">🎬 Populární filmy</a>
+  <a href="?category=popular_tv" class="nav-link {% if category == 'popular_tv' %}active{% endif %}">📺 Populární seriály</a>
+  <a href="?category=top_rated_movies" class="nav-link {% if category == 'top_rated_movies' %}active{% endif %}">⭐ Top filmy</a>
+  <a href="?category=top_rated_tv" class="nav-link {% if category == 'top_rated_tv' %}active{% endif %}">⭐ Top seriály</a>
+  <a href="?category=now_playing" class="nav-link {% if category == 'now_playing' %}active{% endif %}">🎭 V kinech</a>
+  <a href="?category=upcoming" class="nav-link {% if category == 'upcoming' %}active{% endif %}">🔜 Připravované</a>
+</div>
+
+<!-- Pokročilé filtry -->
+{% if category in ['discover_movies', 'discover_tv'] or genre or min_rating > 0 or max_rating < 10 or year %}
+<div class="filters-section">
+  <button class="filters-toggle" onclick="toggleFilters()">
+    🎛️ Filtry <span id="filter-arrow">▼</span>
+  </button>
+
+  <div class="filters-content" id="filters-content">
+    <form method="GET" style="contents;">
+      <input type="hidden" name="category" value="{{ 'discover_movies' if category == 'discover_movies' else 'discover_tv' if category == 'discover_tv' else 'discover_movies' }}">
+
+      <div class="filter-group">
+        <label>Typ obsahu:</label>
+        <select name="category" class="filter-select">
+          <option value="discover_movies" {% if category == 'discover_movies' %}selected{% endif %}>🎬 Filmy</option>
+          <option value="discover_tv" {% if category == 'discover_tv' %}selected{% endif %}>📺 Seriály</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>Žánr:</label>
+        <select name="genre" class="filter-select">
+          <option value="">Všechny žánry</option>
+          {% if category == 'discover_movies' %}
+            {% for g in movie_genres %}
+              <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
+            {% endfor %}
+          {% else %}
+            {% for g in tv_genres %}
+              <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
+            {% endfor %}
+          {% endif %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>Min. hodnocení:</label>
+        <input type="number" name="min_rating" value="{{ min_rating }}" min="0" max="10" step="0.1" class="filter-input">
+      </div>
+
+      <div class="filter-group">
+        <label>Max. hodnocení:</label>
+        <input type="number" name="max_rating" value="{{ max_rating }}" min="0" max="10" step="0.1" class="filter-input">
+      </div>
+
+      <div class="filter-group">
+        <label>Rok:</label>
+        <input type="number" name="year" value="{{ year or '' }}" min="1900" max="2030" class="filter-input">
+      </div>
+
+      <div class="filter-group">
+        <label>Řazení:</label>
+        <select name="sort_by" class="filter-select">
+          <option value="popularity.desc" {% if sort_by == 'popularity.desc' %}selected{% endif %}>Popularita ↓</option>
+          <option value="popularity.asc" {% if sort_by == 'popularity.asc' %}selected{% endif %}>Popularita ↑</option>
+          <option value="vote_average.desc" {% if sort_by == 'vote_average.desc' %}selected{% endif %}>Hodnocení ↓</option>
+          <option value="vote_average.asc" {% if sort_by == 'vote_average.asc' %}selected{% endif %}>Hodnocení ↑</option>
+          <option value="release_date.desc" {% if sort_by == 'release_date.desc' %}selected{% endif %}>Datum ↓</option>
+          <option value="release_date.asc" {% if sort_by == 'release_date.asc' %}selected{% endif %}>Datum ↑</option>
+        </select>
+      </div>
+
+      <button type="submit" class="apply-filters-btn">🔍 Aplikovat filtry</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<!-- Quick Filter Links -->
+<div class="nav-categories" style="margin-top: 1rem;">
+  <a href="?category=discover_movies&min_rating=8" class="nav-link">⭐ Filmy 8+</a>
+  <a href="?category=discover_tv&min_rating=8" class="nav-link">⭐ Seriály 8+</a>
+  <a href="?category=discover_movies&genre=28" class="nav-link">💥 Akční filmy</a>
+  <a href="?category=discover_movies&genre=35" class="nav-link">😄 Komedie</a>
+  <a href="?category=discover_movies&genre=27" class="nav-link">👻 Horror</a>
+  <a href="?category=discover_tv&genre=18" class="nav-link">📚 Drama seriály</a>
+</div>
+
+<!-- Výsledky -->
+{% if q and not items and category == 'search' %}
+  <div class="error">
+    <p>❌ Nic nenalezeno pro: "{{ q }}"</p>
+    <p>💡 Zkuste <a href="?category=discover_movies" style="color: #4ecdc4;">procházet populární filmy</a> nebo <a href="?category=trending" style="color: #4ecdc4;">aktuální trendy</a></p>
+  </div>
+{% endif %}
+
+<div class="content-grid">
+  {% for item in items %}
+    <a class="media-card" href="{{ url_for('title_detail', media_type=item.media_type, tmdb_id=item.tmdb_id) }}">
+      <div class="card-image">
+        {% if item.poster %}
+          <img src="{{ item.poster }}" alt="{{ item.title }}" loading="lazy">
+        {% else %}
+          <div class="poster-placeholder">
+            {{ '🎬' if item.media_type == 'movie' else '📺' }}
+          </div>
+        {% endif %}
+        <div class="card-overlay">
+          <div class="card-title">{{ item.title }}</div>
+          {% if item.rating > 0 %}
+            <div class="card-rating">{{ item.rating_formatted }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card-meta">
+        <div class="card-title">{{ item.title }}</div>
+        <div class="card-year">
+          {{ item.year }} • {{ '🎬 Film' if item.media_type == 'movie' else '📺 Seriál' }}
+        </div>
+
+        {% if item.rating > 0 %}
+          <div class="card-rating">{{ item.rating_formatted }}</div>
+        {% endif %}
+
+        <!-- Žánry (první 2) -->
+        {% if item.genres %}
+          <div class="card-genres">
+            {% for genre_id in item.genres[:2] %}
+              <span class="genre-tag">
+                {% if item.media_type == 'movie' %}
+                  {% for g in movie_genres %}
+                    {% if g.id == genre_id %}{{ g.name }}{% endif %}
+                  {% endfor %}
+                {% else %}
+                  {% for g in tv_genres %}
+                    {% if g.id == genre_id %}{{ g.name }}{% endif %}
+                  {% endfor %}
+                {% endif %}
+              </span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+  <div class="pagination">
+    {% if current_page > 1 %}
+      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + (current_page-1)|string) }}">‹ Předchozí</a>
+    {% endif %}
+
+    {% set start_page = [1, current_page - 2] | max %}
+    {% set end_page = [total_pages, current_page + 2] | min %}
+
+    {% if start_page > 1 %}
+      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=1') }}">1</a>
+      {% if start_page > 2 %}<span>...</span>{% endif %}
+    {% endif %}
+
+    {% for page_num in range(start_page, end_page + 1) %}
+      {% if page_num == current_page %}
+        <span class="current">{{ page_num }}</span>
+      {% else %}
+        <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + page_num|string) }}">{{ page_num }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% if end_page < total_pages %}
+      {% if end_page < total_pages - 1 %}<span>...</span>{% endif %}
+      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + total_pages|string) }}">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if current_page < total_pages %}
+      <a href="?{{ request.query_string.decode() | replace('page=' + current_page|string, 'page=' + (current_page+1)|string) }}">Další ›</a>
+    {% endif %}
+  </div>
+
+  <div style="text-align: center; margin: 1rem 0; color: rgba(255,255,255,0.7);">
+    Stránka {{ current_page }} z {{ total_pages }}
+    {% if items|length > 0 %}
+      ({{ ((current_page-1) * 20 + 1) }}-{{ ((current_page-1) * 20 + items|length) }} výsledků)
+    {% endif %}
+  </div>
+{% endif %}
+
+<script>
+function toggleFilters() {
+  const content = document.getElementById('filters-content');
+  const arrow = document.getElementById('filter-arrow');
+
+  if (content.style.display === 'none' || content.style.display === '') {
+    content.style.display = 'grid';
+    arrow.textContent = '▲';
+  } else {
+    content.style.display = 'none';
+    arrow.textContent = '▼';
+  }
+}
+
+// Auto-hide filters if no filter is active
+document.addEventListener('DOMContentLoaded', function() {
+  const hasActiveFilters = {{ (genre or min_rating > 0 or max_rating < 10 or year or category in ['discover_movies', 'discover_tv']) | tojson }};
+  const content = document.getElementById('filters-content');
+
+  if (!hasActiveFilters && content) {
+    content.style.display = 'none';
+  }
+});
+</script>
+{% endblock %}
