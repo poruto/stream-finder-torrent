@@ -1,95 +1,108 @@
-
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Kategorie navigace -->
+<!-- Zjednodušené hlavní kategorie -->
 <div class="nav-categories">
   <a href="?category=search&q={{ q }}" class="nav-link {% if category == 'search' %}active{% endif %}">🔍 Hledání</a>
   <a href="?category=trending&media_type=all&time_window=week" class="nav-link {% if category == 'trending' %}active{% endif %}">🔥 Trendy</a>
-  <a href="?category=popular_movies" class="nav-link {% if category == 'popular_movies' %}active{% endif %}">🎬 Populární filmy</a>
-  <a href="?category=popular_tv" class="nav-link {% if category == 'popular_tv' %}active{% endif %}">📺 Populární seriály</a>
-  <a href="?category=top_rated_movies" class="nav-link {% if category == 'top_rated_movies' %}active{% endif %}">⭐ Top filmy</a>
-  <a href="?category=top_rated_tv" class="nav-link {% if category == 'top_rated_tv' %}active{% endif %}">⭐ Top seriály</a>
-  <a href="?category=now_playing" class="nav-link {% if category == 'now_playing' %}active{% endif %}">🎭 V kinech</a>
-  <a href="?category=upcoming" class="nav-link {% if category == 'upcoming' %}active{% endif %}">🔜 Připravované</a>
+  <a href="?category=popular_movies" class="nav-link {% if category == 'popular_movies' %}active{% endif %}">🎬 Filmy</a>
+  <a href="?category=popular_tv" class="nav-link {% if category == 'popular_tv' %}active{% endif %}">📺 Seriály</a>
+
+  <!-- Tlačítko pro pokročilé filtry -->
+  <button class="nav-link filter-toggle-btn" onclick="toggleAdvancedFilters()">
+    🎛️ Filtry <span id="main-filter-arrow">▼</span>
+  </button>
 </div>
 
-<!-- Pokročilé filtry -->
-{% if category in ['discover_movies', 'discover_tv'] or genre or min_rating > 0 or max_rating < 10 or year %}
-<div class="filters-section">
-  <button class="filters-toggle" onclick="toggleFilters()">
-    🎛️ Filtry <span id="filter-arrow">▼</span>
-  </button>
+<!-- Pokročilé kategorie a filtry (skryté ve výchozím stavu) -->
+<div class="advanced-filters" id="advanced-filters" style="display: none;">
+  <!-- Další kategorie -->
+  <div class="nav-categories secondary-categories">
+    <a href="?category=top_rated_movies" class="nav-link {% if category == 'top_rated_movies' %}active{% endif %}">⭐ Top filmy</a>
+    <a href="?category=top_rated_tv" class="nav-link {% if category == 'top_rated_tv' %}active{% endif %}">⭐ Top seriály</a>
+    <a href="?category=now_playing" class="nav-link {% if category == 'now_playing' %}active{% endif %}">🎭 V kinech</a>
+    <a href="?category=upcoming" class="nav-link {% if category == 'upcoming' %}active{% endif %}">🔜 Připravované</a>
+  </div>
 
-  <div class="filters-content" id="filters-content">
+  <!-- Pokročilé filtry -->
+  <div class="filters-section">
+    <h3 class="section-title">🎯 Podrobné filtry</h3>
+
     <form method="GET" style="contents;">
-      <input type="hidden" name="category" value="{{ 'discover_movies' if category == 'discover_movies' else 'discover_tv' if category == 'discover_tv' else 'discover_movies' }}">
+      <div class="filters-content">
+        <input type="hidden" name="category" value="{{ 'discover_movies' if category == 'discover_movies' else 'discover_tv' if category == 'discover_tv' else 'discover_movies' }}">
 
-      <div class="filter-group">
-        <label>Typ obsahu:</label>
-        <select name="category" class="filter-select">
-          <option value="discover_movies" {% if category == 'discover_movies' %}selected{% endif %}>🎬 Filmy</option>
-          <option value="discover_tv" {% if category == 'discover_tv' %}selected{% endif %}>📺 Seriály</option>
-        </select>
+        <div class="filter-group">
+          <label>Typ obsahu:</label>
+          <select name="category" class="filter-select">
+            <option value="discover_movies" {% if category == 'discover_movies' %}selected{% endif %}>🎬 Filmy</option>
+            <option value="discover_tv" {% if category == 'discover_tv' %}selected{% endif %}>📺 Seriály</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>Žánr:</label>
+          <select name="genre" class="filter-select">
+            <option value="">Všechny žánry</option>
+            {% if category == 'discover_movies' %}
+              {% for g in movie_genres %}
+                <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
+              {% endfor %}
+            {% else %}
+              {% for g in tv_genres %}
+                <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>Min. hodnocení:</label>
+          <input type="number" name="min_rating" value="{{ min_rating }}" min="0" max="10" step="0.1" class="filter-input">
+        </div>
+
+        <div class="filter-group">
+          <label>Max. hodnocení:</label>
+          <input type="number" name="max_rating" value="{{ max_rating }}" min="0" max="10" step="0.1" class="filter-input">
+        </div>
+
+        <div class="filter-group">
+          <label>Rok:</label>
+          <input type="number" name="year" value="{{ year or '' }}" min="1900" max="2030" class="filter-input">
+        </div>
+
+        <div class="filter-group">
+          <label>Řazení:</label>
+          <select name="sort_by" class="filter-select">
+            <option value="popularity.desc" {% if sort_by == 'popularity.desc' %}selected{% endif %}>Popularita ↓</option>
+            <option value="popularity.asc" {% if sort_by == 'popularity.asc' %}selected{% endif %}>Popularita ↑</option>
+            <option value="vote_average.desc" {% if sort_by == 'vote_average.desc' %}selected{% endif %}>Hodnocení ↓</option>
+            <option value="vote_average.asc" {% if sort_by == 'vote_average.asc' %}selected{% endif %}>Hodnocení ↑</option>
+            <option value="release_date.desc" {% if sort_by == 'release_date.desc' %}selected{% endif %}>Datum ↓</option>
+            <option value="release_date.asc" {% if sort_by == 'release_date.asc' %}selected{% endif %}>Datum ↑</option>
+          </select>
+        </div>
       </div>
 
-      <div class="filter-group">
-        <label>Žánr:</label>
-        <select name="genre" class="filter-select">
-          <option value="">Všechny žánry</option>
-          {% if category == 'discover_movies' %}
-            {% for g in movie_genres %}
-              <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
-            {% endfor %}
-          {% else %}
-            {% for g in tv_genres %}
-              <option value="{{ g.id }}" {% if genre == g.id %}selected{% endif %}>{{ g.name }}</option>
-            {% endfor %}
-          {% endif %}
-        </select>
+      <div class="filter-actions">
+        <button type="submit" class="apply-filters-btn">🔍 Aplikovat filtry</button>
+        <button type="button" class="clear-filters-btn" onclick="clearFilters()">🗑️ Vymazat</button>
       </div>
-
-      <div class="filter-group">
-        <label>Min. hodnocení:</label>
-        <input type="number" name="min_rating" value="{{ min_rating }}" min="0" max="10" step="0.1" class="filter-input">
-      </div>
-
-      <div class="filter-group">
-        <label>Max. hodnocení:</label>
-        <input type="number" name="max_rating" value="{{ max_rating }}" min="0" max="10" step="0.1" class="filter-input">
-      </div>
-
-      <div class="filter-group">
-        <label>Rok:</label>
-        <input type="number" name="year" value="{{ year or '' }}" min="1900" max="2030" class="filter-input">
-      </div>
-
-      <div class="filter-group">
-        <label>Řazení:</label>
-        <select name="sort_by" class="filter-select">
-          <option value="popularity.desc" {% if sort_by == 'popularity.desc' %}selected{% endif %}>Popularita ↓</option>
-          <option value="popularity.asc" {% if sort_by == 'popularity.asc' %}selected{% endif %}>Popularita ↑</option>
-          <option value="vote_average.desc" {% if sort_by == 'vote_average.desc' %}selected{% endif %}>Hodnocení ↓</option>
-          <option value="vote_average.asc" {% if sort_by == 'vote_average.asc' %}selected{% endif %}>Hodnocení ↑</option>
-          <option value="release_date.desc" {% if sort_by == 'release_date.desc' %}selected{% endif %}>Datum ↓</option>
-          <option value="release_date.asc" {% if sort_by == 'release_date.asc' %}selected{% endif %}>Datum ↑</option>
-        </select>
-      </div>
-
-      <button type="submit" class="apply-filters-btn">🔍 Aplikovat filtry</button>
     </form>
   </div>
-</div>
-{% endif %}
 
-<!-- Quick Filter Links -->
-<div class="nav-categories" style="margin-top: 1rem;">
-  <a href="?category=discover_movies&min_rating=8" class="nav-link">⭐ Filmy 8+</a>
-  <a href="?category=discover_tv&min_rating=8" class="nav-link">⭐ Seriály 8+</a>
-  <a href="?category=discover_movies&genre=28" class="nav-link">💥 Akční filmy</a>
-  <a href="?category=discover_movies&genre=35" class="nav-link">😄 Komedie</a>
-  <a href="?category=discover_movies&genre=27" class="nav-link">👻 Horror</a>
-  <a href="?category=discover_tv&genre=18" class="nav-link">📚 Drama seriály</a>
+  <!-- Rychlé filtry -->
+  <div class="quick-filters">
+    <h3 class="section-title">⚡ Rychlé filtry</h3>
+    <div class="nav-categories">
+      <a href="?category=discover_movies&min_rating=8" class="nav-link">⭐ Filmy 8+</a>
+      <a href="?category=discover_tv&min_rating=8" class="nav-link">⭐ Seriály 8+</a>
+      <a href="?category=discover_movies&genre=28" class="nav-link">💥 Akční filmy</a>
+      <a href="?category=discover_movies&genre=35" class="nav-link">😄 Komedie</a>
+      <a href="?category=discover_movies&genre=27" class="nav-link">👻 Horror</a>
+      <a href="?category=discover_tv&genre=18" class="nav-link">📚 Drama seriály</a>
+    </div>
+  </div>
 </div>
 
 <!-- Výsledky -->
@@ -194,12 +207,12 @@
 {% endif %}
 
 <script>
-function toggleFilters() {
-  const content = document.getElementById('filters-content');
-  const arrow = document.getElementById('filter-arrow');
+function toggleAdvancedFilters() {
+  const content = document.getElementById('advanced-filters');
+  const arrow = document.getElementById('main-filter-arrow');
 
   if (content.style.display === 'none' || content.style.display === '') {
-    content.style.display = 'grid';
+    content.style.display = 'block';
     arrow.textContent = '▲';
   } else {
     content.style.display = 'none';
@@ -207,13 +220,19 @@ function toggleFilters() {
   }
 }
 
-// Auto-hide filters if no filter is active
-document.addEventListener('DOMContentLoaded', function() {
-  const hasActiveFilters = {{ (genre or min_rating > 0 or max_rating < 10 or year or category in ['discover_movies', 'discover_tv']) | tojson }};
-  const content = document.getElementById('filters-content');
+function clearFilters() {
+  // Přesměrovat na základní kategorii bez filtrů
+  window.location.href = '?category=popular_movies';
+}
 
-  if (!hasActiveFilters && content) {
-    content.style.display = 'none';
+// Auto-zobrazit filtry pokud jsou nějaké aktivní
+document.addEventListener('DOMContentLoaded', function() {
+  const hasActiveFilters = {{ (genre or min_rating > 0 or max_rating < 10 or year or category in ['discover_movies', 'discover_tv', 'top_rated_movies', 'top_rated_tv', 'now_playing', 'upcoming']) | tojson }};
+  const content = document.getElementById('advanced-filters');
+
+  if (hasActiveFilters && content) {
+    content.style.display = 'block';
+    document.getElementById('main-filter-arrow').textContent = '▲';
   }
 });
 </script>
