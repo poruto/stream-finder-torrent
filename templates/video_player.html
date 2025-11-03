@@ -1,0 +1,39 @@
+<!-- Unified Video Player Component -->
+<div id="video-section" {% if not stream_url %}style="display:none;"{% endif %}>
+  <div class="torrent-section">
+    <h3 class="section-title">🎥 Přehrávač</h3>
+    <div class="player-container">
+      <video id="unified-player" class="player-video" controls preload="metadata">
+        {% if stream_url %}
+          <source src="{{ stream_url }}" type="video/mp4">
+          <source src="{{ stream_url }}" type="application/x-mpegURL">
+        {% endif %}
+        <p>Váš prohlížeč nepodporuje video přehrávání.</p>
+      </video>
+      <div class="player-controls">
+        <button onclick="retryStream()" class="control-btn retry">🔄 Znovu načíst</button>
+        <button onclick="testStream()" class="control-btn test">🧪 Test stream</button>
+        <button onclick="checkTorrServer()" class="control-btn status">🏥 TorrServer status</button>
+      </div>
+    </div>
+    <div class="stream-info" id="stream-info">
+      {% if stream_url %}
+        <div class="info-item">
+          <strong>💡 Stream URL:</strong>
+          <a href="{{ stream_url }}" target="_blank">{{ stream_url[:50] }}...</a>
+        </div>
+        <div class="info-item">
+          <strong>🏠 TorrServer:</strong> {{ torrserver_url or TORRSERVER_URL }}
+        </div>
+        {% if torrent_hash %}
+          <div class="info-item">
+            <strong>📦 Hash:</strong> {{ torrent_hash[:16] }}...
+          </div>
+        {% endif %}
+        <div class="info-tip">
+          💡 <strong>Tip:</strong> Pokud se stream nenačítá, počkej 10-30 sekund a klikni "Znovu načíst"
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

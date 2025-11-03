@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block content %}
   <div class="detail-container {% if mode == 'episode_torrents' %}single-column{% endif %}">
@@ -22,54 +23,39 @@
         </p>
 
         <div class="breadcrumb">
-          <a href="/season/{{ request.args.get('tmdb_id', '') }}/{{ season }}">&larr; Zpět na sezónu</a>
+          <a href="/season/{{ tmdb_id }}/{{ season }}">&larr; Zpět na sezónu</a>
         </div>
 
-        <!-- Video Player pro epizodu -->
-        <div id="episode-video-section" style="display:none;">
-          <div class="torrent-section">
-            <h3 class="section-title">🎥 Přehrávač epizody</h3>
-            <div class="player-container">
-              <video id="episode-player" class="player-video" controls preload="metadata">
-                <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-              </video>
-              <div class="player-controls">
-                <button onclick="retryStream()" class="control-btn retry">🔄 Znovu načíst</button>
-                <button onclick="testStream()" class="control-btn test">🧪 Test stream</button>
-                <button onclick="checkTorrServer()" class="control-btn status">🏥 TorrServer status</button>
-              </div>
-            </div>
-            <div class="stream-info" id="episode-stream-info"></div>
-          </div>
-        </div>
+        <!-- Include unified video player -->
+        {% include 'video_player.html' %}
 
         <!-- Automatické vyhledávání -->
         <div class="torrent-section">
           <h3 class="section-title">🎯 Automatické vyhledávání</h3>
-          <button id="auto-search-btn" onclick="autoSearchTorrents()" class="search-btn">
+          <button id="episode-search-btn" onclick="searchTorrents('episode')" class="search-btn">
             🔍 Vyhledat torrenty pro S{{ season }}E{{ episode }}
           </button>
-          <div id="auto-torrent-list" class="torrent-list" style="display:none;"></div>
+          <div id="episode-torrent-list" class="torrent-list" style="display:none;"></div>
         </div>
 
         <!-- Ruční vyhledávání -->
         <div class="torrent-section">
           <h3 class="section-title">🔧 Ruční vyhledávání</h3>
-          <form onsubmit="manualSearch(event)" class="search-form-inline">
-            <input type="text" id="manual-query" placeholder="Zadej vlastní vyhledávací termín..." class="magnet-input">
+          <form onsubmit="manualSearch(event, 'episode')" class="search-form-inline">
+            <input type="text" id="episode-manual-query" placeholder="Zadej vlastní vyhledávací termín..." class="magnet-input">
             <button type="submit" class="search-btn">🔍 Hledat</button>
           </form>
-          <div id="manual-torrent-list" class="torrent-list" style="display:none;"></div>
+          <div id="episode-manual-torrent-list" class="torrent-list" style="display:none;"></div>
         </div>
 
         <!-- AJAX Magnet form pro epizodu -->
         <div class="torrent-section">
           <h3 class="section-title">📎 Nebo vlož magnet link</h3>
-          <form id="episode-magnet-form" class="magnet-form" onsubmit="submitEpisodeMagnet(event)">
+          <form id="episode-magnet-form" class="magnet-form" onsubmit="submitMagnet(event, 'episode')">
             <input type="text" id="episode-magnet-input" name="magnet" placeholder="magnet:?xt=urn:btih:..." required class="magnet-input">
             <button type="submit" id="episode-magnet-submit" class="submit-btn">▶️ Spustit stream epizody</button>
           </form>
-          <div id="episode-stream-messages" style="margin-top: 10px;"></div>
+          <div id="episode-stream-messages" class="stream-messages"></div>
         </div>
 
       {% else %}
@@ -84,7 +70,7 @@
           <p class="detail-year">📅 {{ year }}</p>
         {% endif %}
 
-              <!-- IMDB odkaz -->
+        <!-- IMDB odkaz -->
         {% if imdb_url %}
           <div class="external-links">
             <a href="{{ imdb_url }}" target="_blank" class="imdb-link">🎬 IMDB</a>
@@ -126,51 +112,13 @@
           </div>
         {% endif %}
 
-        <!-- Video Player pro hlavní přehrávač -->
-        <div id="main-video-section" {% if not stream_url %}style="display:none;"{% endif %}>
-          <div class="torrent-section">
-            <h3 class="section-title">🎥 Přehrávač</h3>
-            <div class="player-container">
-              <video id="main-player" class="player-video" controls preload="metadata">
-                {% if stream_url %}
-                  <source src="{{ stream_url }}" type="video/mp4">
-                  <source src="{{ stream_url }}" type="application/x-mpegURL">
-                {% endif %}
-                <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-              </video>
-              <div class="player-controls">
-                <button onclick="retryMainStream()" class="control-btn retry">🔄 Znovu načíst</button>
-                <button onclick="testMainStream()" class="control-btn test">🧪 Test stream</button>
-                <button onclick="checkTorrServer()" class="control-btn status">🏥 TorrServer status</button>
-              </div>
-            </div>
-            <div class="stream-info" id="main-stream-info">
-              {% if stream_url %}
-                <div class="info-item">
-                  <strong>💡 Stream URL:</strong>
-                  <a href="{{ stream_url }}" target="_blank">{{ stream_url[:50] }}...</a>
-                </div>
-                <div class="info-item">
-                  <strong>🏠 TorrServer:</strong> {{ torrserver_url }}
-                </div>
-                {% if torrent_hash %}
-                  <div class="info-item">
-                    <strong>📦 Hash:</strong> {{ torrent_hash[:16] }}...
-                  </div>
-                {% endif %}
-                <div class="info-tip">
-                  💡 <strong>Tip:</strong> Pokud se stream nenačítá, počkej 10-30 sekund a klikni "Znovu načíst"
-                </div>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
+        <!-- Include unified video player -->
+        {% include 'video_player.html' %}
 
         <!-- VYHLEDÁVÁNÍ TORRENTŮ PRO FILMY/SERIÁLY -->
         <div class="torrent-section">
           <h3 class="section-title">🎯 Vyhledat torrenty</h3>
-          <button id="main-search-btn" onclick="searchMainTorrents()" class="search-btn">
+          <button id="main-search-btn" onclick="searchTorrents('main')" class="search-btn">
             🔍 Vyhledat torrenty pro "{{ title }}"
           </button>
           <div id="main-torrent-list" class="torrent-list" style="display:none;"></div>
@@ -179,7 +127,7 @@
         <!-- Ruční vyhledávání pro filmy/seriály -->
         <div class="torrent-section">
           <h3 class="section-title">🔧 Ruční vyhledávání</h3>
-          <form onsubmit="manualMainSearch(event)" class="search-form-inline">
+          <form onsubmit="manualSearch(event, 'main')" class="search-form-inline">
             <input type="text" id="main-manual-query" placeholder="Zadej vlastní vyhledávací termín..." class="magnet-input">
             <button type="submit" class="search-btn">🔍 Hledat</button>
           </form>
@@ -189,14 +137,12 @@
         <!-- AJAX Magnet form pro film/celý seriál -->
         <div class="torrent-section">
           <h3 class="section-title">📎 Nebo vlož magnet link</h3>
-          <form id="main-magnet-form" class="magnet-form" onsubmit="submitMainMagnet(event)">
+          <form id="main-magnet-form" class="magnet-form" onsubmit="submitMagnet(event, 'main')">
             <input type="text" id="main-magnet-input" name="magnet" placeholder="magnet:?xt=urn:btih:..." required class="magnet-input">
             <button type="submit" id="main-magnet-submit" class="submit-btn">▶️ Spustit stream</button>
           </form>
-          <div id="main-stream-messages" style="margin-top: 10px;"></div>
+          <div id="main-stream-messages" class="stream-messages"></div>
         </div>
-
-              <!-- Přidejte toto za existující informace -->
 
         <!-- Základní informace -->
         {% if tagline %}
@@ -221,158 +167,62 @@
           </div>
         {% endif %}
 
-        <!-- Technické detaily pro filmy -->
+        <!-- Technické detaily -->
         {% if media_type == 'movie' %}
           <div class="movie-details">
             <h3 class="section-title">🎬 Detaily filmu</h3>
             <div class="details-grid">
               {% if runtime %}
-                <div class="detail-item">
-                  <strong>⏱️ Délka:</strong> {{ runtime }} minut
-                </div>
+                <div class="detail-item"><strong>⏱️ Délka:</strong> {{ runtime }} minut</div>
               {% endif %}
               {% if status %}
-                <div class="detail-item">
-                  <strong>📋 Status:</strong> {{ status }}
-                </div>
+                <div class="detail-item"><strong>📋 Status:</strong> {{ status }}</div>
               {% endif %}
               {% if budget and budget > 0 %}
-                <div class="detail-item">
-                  <strong>💰 Rozpočet:</strong> ${{ "{:,}".format(budget) }}
-                </div>
+                <div class="detail-item"><strong>💰 Rozpočet:</strong> ${{ "{:,}".format(budget) }}</div>
               {% endif %}
               {% if revenue and revenue > 0 %}
-                <div class="detail-item">
-                  <strong>💸 Tržby:</strong> ${{ "{:,}".format(revenue) }}
-                </div>
-              {% endif %}
-              {% if adult %}
-                <div class="detail-item">
-                  <strong>🔞 Pro dospělé:</strong> Ano
-                </div>
+                <div class="detail-item"><strong>💸 Tržby:</strong> ${{ "{:,}".format(revenue) }}</div>
               {% endif %}
             </div>
           </div>
         {% endif %}
 
-        <!-- Technické detaily pro seriály -->
         {% if media_type == 'tv' %}
           <div class="tv-details">
             <h3 class="section-title">📺 Detaily seriálu</h3>
             <div class="details-grid">
               {% if number_of_seasons %}
-                <div class="detail-item">
-                  <strong>📚 Počet sezón:</strong> {{ number_of_seasons }}
-                </div>
+                <div class="detail-item"><strong>📚 Počet sezón:</strong> {{ number_of_seasons }}</div>
               {% endif %}
               {% if number_of_episodes %}
-                <div class="detail-item">
-                  <strong>🎞️ Celkový počet epizod:</strong> {{ number_of_episodes }}
-                </div>
+                <div class="detail-item"><strong>📺 Počet epizod:</strong> {{ number_of_episodes }}</div>
               {% endif %}
-              {% if episode_run_time %}
-                <div class="detail-item">
-                  <strong>⏱️ Délka epizod:</strong> {{ episode_run_time|join(', ') }} minut
-                </div>
-              {% endif %}
-              {% if in_production %}
-                <div class="detail-item">
-                  <strong>🎬 Status:</strong> {{ 'V produkci' if in_production else 'Ukončen' }}
-                </div>
+              {% if status %}
+                <div class="detail-item"><strong>📋 Status:</strong> {{ status }}</div>
               {% endif %}
               {% if last_air_date %}
-                <div class="detail-item">
-                  <strong>📅 Posledního vysílání:</strong> {{ last_air_date }}
-                </div>
-              {% endif %}
-              {% if next_episode_to_air %}
-                <div class="detail-item">
-                  <strong>🔜 Další epizoda:</strong>
-                  S{{ next_episode_to_air.season_number }}E{{ next_episode_to_air.episode_number }}
-                  ({{ next_episode_to_air.air_date }})
-                </div>
+                <div class="detail-item"><strong>📅 Poslední díl:</strong> {{ last_air_date }}</div>
               {% endif %}
             </div>
           </div>
-
-          <!-- Tvůrci seriálu -->
-          {% if created_by %}
-            <div class="creators-section">
-              <h3 class="section-title">👥 Tvůrci</h3>
-              <div class="creators-list">
-                {% for creator in created_by %}
-                  <span class="creator-name">{{ creator.name }}</span>
-                {% endfor %}
-              </div>
-            </div>
-          {% endif %}
-
-          <!-- Televizní sítě -->
-          {% if networks %}
-            <div class="networks-section">
-              <h3 class="section-title">📡 Televizní sítě</h3>
-              <div class="networks-list">
-                {% for network in networks %}
-                  <span class="network-name">{{ network.name }}</span>
-                {% endfor %}
-              </div>
-            </div>
-          {% endif %}
         {% endif %}
 
-        <!-- Produkční informace -->
-        {% if production_companies %}
-          <div class="production-section">
-            <h3 class="section-title">🏢 Produkční společnosti</h3>
-            <div class="production-companies">
-              {% for company in production_companies %}
-                <span class="company-name">{{ company.name }}</span>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-        {% if production_countries %}
-          <div class="countries-section">
-            <h3 class="section-title">🌍 Země produkce</h3>
-            <div class="countries-list">
-              {% for country in production_countries %}
-                <span class="country-name">{{ country.name }}</span>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-        {% if spoken_languages %}
-          <div class="languages-section">
-            <h3 class="section-title">🗣️ Jazyky</h3>
-            <div class="languages-list">
-              {% for lang in spoken_languages %}
-                <span class="language-name">{{ lang.name }}</span>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-                <!-- Obsazení s fotkami -->
+        <!-- Obsazení -->
         {% if cast %}
           <div class="cast-section">
-            <h3 class="section-title">🎭 Hlavní obsazení</h3>
+            <h3 class="section-title">👥 Hlavní role</h3>
             <div class="cast-grid">
-              {% for actor in cast %}
+              {% for actor in cast[:8] %}
                 <div class="cast-member">
-                  <div class="actor-photo">
-                    {% if actor.profile_path %}
-                      <img src="{{ actor.profile_path }}" alt="{{ actor.name }}" loading="lazy">
-                    {% else %}
-                      <div class="photo-placeholder">👤</div>
-                    {% endif %}
-                  </div>
-                  <div class="actor-info">
-                    <div class="actor-name">{{ actor.name }}</div>
-                    {% if actor.character %}
-                      <div class="character-name">{{ actor.character }}</div>
-                    {% endif %}
+                  {% if actor.profile_path %}
+                    <img src="{{ actor.profile_path }}" alt="{{ actor.name }}" class="cast-photo">
+                  {% else %}
+                    <div class="cast-photo-placeholder">👤</div>
+                  {% endif %}
+                  <div class="cast-info">
+                    <div class="cast-name">{{ actor.name }}</div>
+                    <div class="cast-character">{{ actor.character }}</div>
                   </div>
                 </div>
               {% endfor %}
@@ -380,187 +230,25 @@
           </div>
         {% endif %}
 
-        <!-- Štáb s fotkami -->
-        {% if crew %}
-          <div class="crew-section">
-            <h3 class="section-title">🎬 Klíčový štáb</h3>
-            <div class="crew-grid">
-              {% for member in crew %}
-                <div class="crew-member">
-                  <div class="crew-photo">
-                    {% if member.profile_path %}
-                      <img src="{{ member.profile_path }}" alt="{{ member.name }}" loading="lazy">
-                    {% else %}
-                      <div class="photo-placeholder">🎬</div>
-                    {% endif %}
-                  </div>
-                  <div class="crew-info">
-                    <div class="crew-name">{{ member.name }}</div>
-                    <div class="crew-job">{{ member.job }}</div>
-                    {% if member.department %}
-                      <div class="crew-department">{{ member.department }}</div>
-                    {% endif %}
-                  </div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-        <!-- Výsledky streamování z server-side (pokud byly předané) -->
-        {% if error %}
-          <div class="error">❌ {{ error }}</div>
-        {% endif %}
-        {% if warning %}
-          <div class="warning">⚠️ {{ warning }}</div>
-        {% endif %}
       {% endif %}
     </div>
   </div>
 
+  <!-- Include unified JavaScript -->
+  {% include 'video_player_script.html' %}
+
+  <!-- Debug script -->
+  <script>
+  // Add debug information
+  console.log('Current mode:', '{{ mode }}');
+  console.log('Season:', {{ season if season else 'null' }});
+  console.log('Episode:', {{ episode if episode else 'null' }});
+  </script>
+
   <style>
-      .cast-grid, .crew-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 1.5rem;
-    margin-top: 1rem;
+  .stream-messages {
+    margin-top: 10px;
   }
-
-  .cast-member, .crew-member {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    overflow: hidden;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .cast-member:hover, .crew-member:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-  }
-
-  .actor-photo, .crew-photo {
-    width: 100%;
-    height: 220px;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .actor-photo img, .crew-photo img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.3s ease;
-  }
-
-  .cast-member:hover .actor-photo img,
-  .crew-member:hover .crew-photo img {
-    transform: scale(1.05);
-  }
-
-  .photo-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, rgba(78, 205, 196, 0.2), rgba(85, 98, 112, 0.2));
-    font-size: 3em;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .actor-info, .crew-info {
-    padding: 1rem;
-    text-align: center;
-  }
-
-  .actor-name, .crew-name {
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-    color: #fff;
-    font-size: 1rem;
-    line-height: 1.2;
-  }
-
-  .character-name {
-    color: #4ecdc4;
-    font-size: 0.9rem;
-    font-style: italic;
-    margin-bottom: 0.25rem;
-  }
-
-  .crew-job {
-    color: #ffa500;
-    font-size: 0.9rem;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
-  }
-
-  .crew-department {
-    color: #ccc;
-    font-size: 0.8rem;
-    opacity: 0.8;
-  }
-
-  /* Responsivní design pro menší obrazovky */
-  @media (max-width: 768px) {
-    .cast-grid, .crew-grid {
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 1rem;
-    }
-
-    .actor-photo, .crew-photo {
-      height: 180px;
-    }
-
-    .actor-info, .crew-info {
-      padding: 0.75rem;
-    }
-
-    .actor-name, .crew-name {
-      font-size: 0.9rem;
-    }
-
-    .character-name, .crew-job {
-      font-size: 0.8rem;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .cast-grid, .crew-grid {
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 0.75rem;
-    }
-
-    .actor-photo, .crew-photo {
-      height: 150px;
-    }
-
-    .photo-placeholder {
-      font-size: 2em;
-    }
-  }
-
-
-
-  .single-column {
-    grid-template-columns: 1fr;
-    max-width: 1000px;
-    margin: 0 auto;
-  }
-
-  .search-form-inline {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-  }
-
-  .search-form-inline input {
-    flex: 1;
-    min-width: 300px;
-  }
-
   .loading {
     color: #ffa500;
     font-weight: 500;
@@ -580,515 +268,5 @@
     background: rgba(220, 53, 69, 0.1);
     border-radius: 5px;
   }
-  .warning {
-    color: #ffc107;
-    font-weight: 500;
-    padding: 10px;
-    background: rgba(255, 193, 7, 0.1);
-    border-radius: 5px;
-  }
-
-  .subtitles-section {
-    margin: 2rem 0;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-  }
-
-  .subtitle-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    margin: 0.5rem 0;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-  }
-
-  .subtitle-info {
-    flex: 1;
-  }
-
-  .subtitle-name {
-    font-weight: 600;
-    color: #fff;
-  }
-
-  .subtitle-meta {
-    font-size: 0.9rem;
-    color: #ccc;
-    margin-top: 0.25rem;
-  }
-
-  .download-btn {
-    padding: 0.5rem 1rem;
-    background: #28a745;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: background 0.3s;
-  }
-
-  .download-btn:hover {
-    background: #218838;
-  }
-
-  .download-btn:disabled {
-    background: #6c757d;
-    cursor: not-allowed;
-  }
   </style>
-
-  <script>
-  // Globální proměnné
-  let currentEpisodeStreamUrl = null;
-  let currentMainStreamUrl = '{{ stream_url if stream_url else "" }}';
-  let currentTmdbId = {{ tmdb_id if tmdb_id else 'null' }};
-  let currentMediaType = '{{ media_type if media_type else "movie" }}';
-  let currentSeason = {{ season if season else 'null' }};
-  let currentEpisode = {{ episode if episode else 'null' }};
-
-  {% if mode == 'episode_torrents' %}
-  // === EPISODE TORRENTS FUNCTIONS ===
-  async function autoSearchTorrents() {
-    const button = document.getElementById('auto-search-btn');
-    const list = document.getElementById('auto-torrent-list');
-
-    button.textContent = '⏳ Hledám torrenty...';
-    button.disabled = true;
-
-    list.innerHTML = '<div class="loading">🔍 Vyhledávám S{{ season }}E{{ episode }}...</div>';
-    list.style.display = 'block';
-
-    try {
-      const response = await fetch('/api/torrents', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          title: '{{ title|e }}',
-          english_title: '{{ english_title|e }}',
-          year: '',
-          media_type: 'tv',
-          season: {{ season|int }},
-          episode: {{ episode|int }}
-        })
-      });
-
-      const torrents = await response.json();
-      renderTorrents(torrents, list);
-    } catch (error) {
-      list.innerHTML = '<div class="torrent-item"><div class="torrent-name" style="color:#ff6b6b;">❌ Chyba při vyhledávání: ' + error.message + '</div></div>';
-    }
-
-    button.textContent = '🔄 Vyhledat znovu';
-    button.disabled = false;
-  }
-
-  async function manualSearch(event) {
-    event.preventDefault();
-
-    const query = document.getElementById('manual-query').value.trim();
-    const list = document.getElementById('manual-torrent-list');
-
-    if (!query) return;
-
-    list.innerHTML = '<div class="loading">🔍 Vyhledávám "' + query + '"...</div>';
-    list.style.display = 'block';
-
-    try {
-      const response = await fetch('/api/torrents', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          title: query,
-          english_title: query,
-          year: '',
-          media_type: 'tv'
-        })
-      });
-
-      const torrents = await response.json();
-      renderTorrents(torrents, list);
-    } catch (error) {
-      list.innerHTML = '<div class="torrent-item"><div class="torrent-name" style="color:#ff6b6b;">❌ Chyba při vyhledávání: ' + error.message + '</div></div>';
-    }
-  }
-
-  async function submitEpisodeMagnet(event) {
-    event.preventDefault();
-
-    const magnetInput = document.getElementById('episode-magnet-input');
-    const magnet = magnetInput.value.trim();
-
-    if (!magnet) return;
-
-    await playEpisodeTorrentAjax(magnet);
-  }
-
-  async function playEpisodeTorrentAjax(magnetOrEncoded) {
-    const magnet = magnetOrEncoded.startsWith('magnet:') ? magnetOrEncoded : decodeURIComponent(magnetOrEncoded);
-    const submitBtn = document.getElementById('episode-magnet-submit');
-    const messagesDiv = document.getElementById('episode-stream-messages');
-
-    submitBtn.textContent = '⏳ Zpracovávám torrent...';
-    submitBtn.disabled = true;
-    messagesDiv.innerHTML = '<div class="loading">🔄 Přidávám torrent do TorrServeru...</div>';
-
-    try {
-      const response = await fetch('/api/play-torrent', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ magnet: magnet })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        messagesDiv.innerHTML = '<div class="success">✅ ' + (result.message || 'Stream epizody je připraven!') + '</div>';
-        showEpisodePlayer(result.stream_url, result.hash, result.warning);
-        document.getElementById('episode-magnet-input').value = '';
-      } else {
-        messagesDiv.innerHTML = '<div class="error">❌ ' + (result.error || 'Neznámá chyba') + '</div>';
-      }
-    } catch (error) {
-      messagesDiv.innerHTML = '<div class="error">❌ Síťová chyba: ' + error.message + '</div>';
-    }
-
-    submitBtn.textContent = '▶️ Spustit stream epizody';
-    submitBtn.disabled = false;
-  }
-
-  function showEpisodePlayer(streamUrl, hash, warning) {
-    currentEpisodeStreamUrl = streamUrl;
-
-    const playerSection = document.getElementById('episode-video-section');
-    const player = document.getElementById('episode-player');
-    const infoContent = document.getElementById('episode-stream-info');
-
-    player.innerHTML = `
-      <source src="${streamUrl}" type="video/mp4">
-      <source src="${streamUrl}" type="application/x-mpegURL">
-      <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-    `;
-
-    infoContent.innerHTML = `
-      <div class="info-item">
-        <strong>💡 Stream URL:</strong>
-        <a href="${streamUrl}" target="_blank">${streamUrl.substr(0, 50)}...</a>
-      </div>
-      <div class="info-item">
-        <strong>🏠 TorrServer:</strong> {{ TORRSERVER_URL|e }}
-      </div>
-      ${hash ? `<div class="info-item"><strong>📦 Hash:</strong> ${hash.substr(0, 16)}...</div>` : ''}
-      ${warning ? `<div class="warning">⚠️ ${warning}</div>` : ''}
-      <div class="info-tip">
-        💡 <strong>Tip:</strong> Pokud se stream nenačítá, počkej 10-30 sekund a klikni "Znovu načíst"
-      </div>
-    `;
-
-    playerSection.style.display = 'block';
-    playerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    player.load();
-    setTimeout(() => {
-      player.play().catch(e => console.log('Autoplay failed:', e));
-    }, 1000);
-  }
-
-  function retryStream() {
-    const player = document.getElementById('episode-player');
-    if (player && currentEpisodeStreamUrl) {
-      console.log('🔄 Restarting episode stream...');
-      player.load();
-      setTimeout(() => {
-        player.play().catch(e => console.log('Autoplay failed:', e));
-      }, 2000);
-    }
-  }
-
-  async function testStream() {
-    if (!currentEpisodeStreamUrl) {
-      alert('❌ Žádná stream URL není dostupná');
-      return;
-    }
-
-    try {
-      const response = await fetch(currentEpisodeStreamUrl, { method: 'HEAD' });
-      if (response.ok || response.status === 206) {
-        alert('✅ Stream URL je dostupná a funguje!');
-      } else {
-        alert(`⚠️ Stream URL odpovídá s HTTP ${response.status}. Možná se ještě načítá.`);
-      }
-    } catch (error) {
-      alert('❌ Stream URL není dostupná: ' + error.message);
-    }
-  }
-
-  {% else %}
-  // === MAIN TITLE DETAIL FUNCTIONS ===
-
-  async function searchMainTorrents() {
-    const button = document.getElementById('main-search-btn');
-    const list = document.getElementById('main-torrent-list');
-
-    button.textContent = '⏳ Hledám torrenty...';
-    button.disabled = true;
-
-    list.innerHTML = '<div class="loading">🔍 Vyhledávám "{{ title|e }}"...</div>';
-    list.style.display = 'block';
-
-    try {
-      const response = await fetch('/api/torrents', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          title: '{{ title|e }}',
-          english_title: '{{ english_title|e }}',
-          year: '{{ year|e }}',
-          media_type: '{{ media_type|e }}'
-        })
-      });
-
-      const torrents = await response.json();
-      renderMainTorrents(torrents, list);
-    } catch (error) {
-      list.innerHTML = '<div class="torrent-item"><div class="torrent-name" style="color:#ff6b6b;">❌ Chyba při vyhledávání: ' + error.message + '</div></div>';
-    }
-
-    button.textContent = '🔄 Vyhledat znovu';
-    button.disabled = false;
-  }
-
-  async function manualMainSearch(event) {
-    event.preventDefault();
-
-    const query = document.getElementById('main-manual-query').value.trim();
-    const list = document.getElementById('main-manual-torrent-list');
-
-    if (!query) return;
-
-    list.innerHTML = '<div class="loading">🔍 Vyhledávám "' + query + '"...</div>';
-    list.style.display = 'block';
-
-    try {
-      const response = await fetch('/api/torrents', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          title: query,
-          english_title: query,
-          year: '{{ year|e }}',
-          media_type: '{{ media_type|e }}'
-        })
-      });
-
-      const torrents = await response.json();
-      renderMainTorrents(torrents, list);
-    } catch (error) {
-      list.innerHTML = '<div class="torrent-item"><div class="torrent-name" style="color:#ff6b6b;">❌ Chyba při vyhledávání: ' + error.message + '</div></div>';
-    }
-  }
-
-  async function submitMainMagnet(event) {
-    event.preventDefault();
-
-    const magnetInput = document.getElementById('main-magnet-input');
-    const magnet = magnetInput.value.trim();
-
-    if (!magnet) return;
-
-    await playMainTorrentAjax(magnet);
-  }
-
-  async function playMainTorrentAjax(magnetOrEncoded) {
-    const magnet = magnetOrEncoded.startsWith('magnet:') ? magnetOrEncoded : decodeURIComponent(magnetOrEncoded);
-    const submitBtn = document.getElementById('main-magnet-submit');
-    const messagesDiv = document.getElementById('main-stream-messages');
-
-    submitBtn.textContent = '⏳ Zpracovávám torrent...';
-    submitBtn.disabled = true;
-    messagesDiv.innerHTML = '<div class="loading">🔄 Přidávám torrent do TorrServeru...</div>';
-
-    try {
-      const response = await fetch('/api/play-torrent', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ magnet: magnet })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        messagesDiv.innerHTML = '<div class="success">✅ ' + (result.message || 'Stream je připraven!') + '</div>';
-        showMainPlayer(result.stream_url, result.hash, result.warning);
-        document.getElementById('main-magnet-input').value = '';
-      } else {
-        messagesDiv.innerHTML = '<div class="error">❌ ' + (result.error || 'Neznámá chyba') + '</div>';
-      }
-    } catch (error) {
-      messagesDiv.innerHTML = '<div class="error">❌ Síťová chyba: ' + error.message + '</div>';
-    }
-
-    submitBtn.textContent = '▶️ Spustit stream';
-    submitBtn.disabled = false;
-  }
-
-  function showMainPlayer(streamUrl, hash, warning) {
-    currentMainStreamUrl = streamUrl;
-
-    const playerSection = document.getElementById('main-video-section');
-    const player = document.getElementById('main-player');
-    const infoContent = document.getElementById('main-stream-info');
-
-    player.innerHTML = `
-      <source src="${streamUrl}" type="video/mp4">
-      <source src="${streamUrl}" type="application/x-mpegURL">
-      <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-    `;
-
-    infoContent.innerHTML = `
-      <div class="info-item">
-        <strong>💡 Stream URL:</strong>
-        <a href="${streamUrl}" target="_blank">${streamUrl.substr(0, 50)}...</a>
-      </div>
-      <div class="info-item">
-        <strong>🏠 TorrServer:</strong> {{ torrserver_url }}
-      </div>
-      ${hash ? `<div class="info-item"><strong>📦 Hash:</strong> ${hash.substr(0, 16)}...</div>` : ''}
-      ${warning ? `<div class="warning">⚠️ ${warning}</div>` : ''}
-      <div class="info-tip">
-        💡 <strong>Tip:</strong> Pokud se stream nenačítá, počkej 10-30 sekund a klikni "Znovu načíst"
-      </div>
-    `;
-
-    playerSection.style.display = 'block';
-    playerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    player.load();
-    setTimeout(() => {
-      player.play().catch(e => console.log('Autoplay failed:', e));
-    }, 1000);
-  }
-
-  function renderMainTorrents(torrents, container) {
-    if (torrents.length === 0) {
-      container.innerHTML = '<div class="torrent-item"><div class="torrent-name">❌ Žádné torrenty nebyly nalezeny</div></div>';
-      return;
-    }
-
-    container.innerHTML = torrents.map(t => `
-      <div class="torrent-item">
-        <div class="torrent-name">${t.name}</div>
-        <div class="torrent-meta">
-          <span>📦 ${t.size || 'N/A'}</span>
-          <span>🌱 ${t.seeders || 0} seeders</span>
-          <span>📥 ${t.leechers || 0} leechers</span>
-          <span>📡 ${t.source}</span>
-        </div>
-        <button onclick="playMainTorrentAjax('${encodeURIComponent(t.magnet)}')" class="play-btn">
-          ▶️ Přehrát
-        </button>
-      </div>
-    `).join('');
-  }
-
-  function retryMainStream() {
-    const player = document.getElementById('main-player');
-    if (player && currentMainStreamUrl) {
-      console.log('🔄 Restarting main stream...');
-      player.load();
-      setTimeout(() => {
-        player.play().catch(e => console.log('Autoplay failed:', e));
-      }, 2000);
-    }
-  }
-
-  async function testMainStream() {
-    if (!currentMainStreamUrl) {
-      alert('❌ Žádná stream URL není dostupná');
-      return;
-    }
-
-    try {
-      const response = await fetch(currentMainStreamUrl, { method: 'HEAD' });
-      if (response.ok || response.status === 206) {
-        alert('✅ Stream URL je dostupná a funguje!');
-      } else {
-        alert(`⚠️ Stream URL odpovídá s HTTP ${response.status}. Možná se ještě načítá.`);
-      }
-    } catch (error) {
-      alert('❌ Stream URL není dostupná: ' + error.message);
-    }
-  }
-  {% endif %}
-
-  // === SPOLEČNÉ FUNKCE ===
-
-  function renderTorrents(torrents, container) {
-    if (torrents.length === 0) {
-      container.innerHTML = '<div class="torrent-item"><div class="torrent-name">❌ Žádné torrenty nebyly nalezeny</div></div>';
-      return;
-    }
-
-    container.innerHTML = torrents.map(t => `
-      <div class="torrent-item">
-        <div class="torrent-name">${t.name}</div>
-        <div class="torrent-meta">
-          <span>📦 ${t.size || 'N/A'}</span>
-          <span>🌱 ${t.seeders || 0} seeders</span>
-          <span>📥 ${t.leechers || 0} leechers</span>
-          <span>📡 ${t.source}</span>
-        </div>
-        <button onclick="playEpisodeTorrentAjax('${encodeURIComponent(t.magnet)}')" class="play-btn">
-          ▶️ Přehrát
-        </button>
-      </div>
-    `).join('');
-  }
-
-  async function checkTorrServer() {
-    try {
-      const response = await fetch('/api/torrserver-status');
-      const status = await response.json();
-      if (status.status === 'online') {
-        alert('✅ TorrServer je online a funguje');
-      } else {
-        alert('❌ TorrServer není dostupný na ' + status.url);
-      }
-    } catch {
-      alert('❌ Nelze zkontrolovat TorrServer');
-    }
-  }
-
-  // Inicializace při načtení
-  window.onload = function() {
-    {% if mode == 'episode_torrents' %}
-      {% if not stream_url %}
-        autoSearchTorrents();
-      {% else %}
-        showEpisodePlayer('{{ stream_url|e }}', '{{ torrent_hash|e or "" }}', null);
-        autoSearchTorrents();
-      {% endif %}
-
-      const episodePlayer = document.getElementById('episode-player');
-      if (episodePlayer) {
-        episodePlayer.addEventListener('error', function() {
-          console.log('⚠️ Episode video error, retrying in 5s...');
-          setTimeout(() => retryStream(), 5000);
-        });
-      }
-    {% else %}
-      const mainPlayer = document.getElementById('main-player');
-      if (mainPlayer) {
-        mainPlayer.addEventListener('error', function() {
-          console.log('⚠️ Main video error, retrying in 5s...');
-          setTimeout(() => retryMainStream(), 5000);
-        });
-      }
-    {% endif %}
-  }
-  </script>
 {% endblock %}

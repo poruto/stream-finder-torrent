@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 {% block content %}
   <div class="detail-container">
@@ -42,28 +41,13 @@
         </div>
       </div>
 
-      <!-- Video Player pro celou sezónu -->
-      <div id="season-video-section" style="display:none;">
-        <div class="torrent-section">
-          <h3 class="section-title">🎥 Přehrávač celé sezóny</h3>
-          <div class="player-container">
-            <video id="season-player" class="player-video" controls preload="metadata">
-              <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-            </video>
-            <div class="player-controls">
-              <button onclick="retrySeasonStream()" class="control-btn retry">🔄 Znovu načíst</button>
-              <button onclick="testSeasonStream()" class="control-btn test">🧪 Test stream</button>
-              <button onclick="checkTorrServer()" class="control-btn status">🏥 TorrServer status</button>
-            </div>
-          </div>
-          <div class="stream-info" id="season-stream-info"></div>
-        </div>
-      </div>
+      <!-- Include unified video player -->
+      {% include 'video_player.html' %}
 
       <!-- Vyhledávání torrentů pro celou sezónu -->
       <div class="torrent-section">
         <h3 class="section-title">🎯 Vyhledat torrenty pro celou sezónu</h3>
-        <button id="season-search-btn" onclick="searchSeasonTorrents()" class="search-btn">
+        <button id="season-search-btn" onclick="searchTorrents('season')" class="search-btn">
           🔍 Vyhledat torrenty pro "{{ season_name }}"
         </button>
         <div id="season-torrent-list" class="torrent-list" style="display:none;"></div>
@@ -72,16 +56,37 @@
       <!-- AJAX Magnet form pro celou sezónu -->
       <div class="torrent-section">
         <h3 class="section-title">📎 Nebo vlož magnet link pro celou sezónu</h3>
-        <form id="season-magnet-form" class="magnet-form" onsubmit="submitSeasonMagnet(event)">
+        <form id="season-magnet-form" class="magnet-form" onsubmit="submitMagnet(event, 'season')">
           <input type="text" id="season-magnet-input" name="magnet" placeholder="magnet:?xt=urn:btih:..." required class="magnet-input">
           <button type="submit" id="season-magnet-submit" class="submit-btn">▶️ Spustit stream celé sezóny</button>
         </form>
-        <div id="season-stream-messages" style="margin-top: 10px;"></div>
+        <div id="season-stream-messages" class="stream-messages"></div>
       </div>
     </div>
   </div>
 
+  <!-- Include unified JavaScript -->
+  {% include 'video_player_script.html' %}
+
+  <script>
+  function searchEpisodeTorrents(title, season, episode, episodeName) {
+    const params = new URLSearchParams({
+      title: title,
+      english_title: '{{ english_title }}',
+      season: season,
+      episode: episode,
+      episodeName: episodeName,
+      tmdb_id: '{{ tmdb_id }}'
+    });
+
+    window.location.href = '/episode-torrents?' + params.toString();
+  }
+  </script>
+
   <style>
+  .stream-messages {
+    margin-top: 10px;
+  }
   .loading {
     color: #ffa500;
     font-weight: 500;
@@ -102,200 +107,4 @@
     border-radius: 5px;
   }
   </style>
-
-  <script>
-  let currentSeasonStreamUrl = null;
-
-  function searchEpisodeTorrents(title, season, episode, episodeName) {
-    const params = new URLSearchParams({
-      title: title,
-      english_title: '{{ english_title }}',
-      season: season,
-      episode: episode,
-      episodeName: episodeName,
-      tmdb_id: '{{ tmdb_id }}'
-    });
-
-    window.location.href = '/episode-torrents?' + params.toString();
-  }
-
-  async function searchSeasonTorrents() {
-    const button = document.getElementById('season-search-btn');
-    const list = document.getElementById('season-torrent-list');
-
-    button.textContent = '⏳ Hledám torrenty...';
-    button.disabled = true;
-
-    list.innerHTML = '<div class="loading">🔍 Vyhledávám torrenty pro celou sezónu...</div>';
-    list.style.display = 'block';
-
-    try {
-      const response = await fetch('/api/torrents', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          title: '{{ english_title or title }}',
-          english_title: '{{ english_title }}',
-          year: '',
-          media_type: 'tv',
-          season: {{ season_number }}
-        })
-      });
-
-      const torrents = await response.json();
-      renderSeasonTorrents(torrents, list);
-    } catch (error) {
-      list.innerHTML = '<div class="torrent-item"><div class="torrent-name" style="color:#ff6b6b;">❌ Chyba při vyhledávání: ' + error.message + '</div></div>';
-    }
-
-    button.textContent = '🔄 Vyhledat znovu';
-    button.disabled = false;
-  }
-
-  function renderSeasonTorrents(torrents, container) {
-    if (torrents.length === 0) {
-      container.innerHTML = '<div class="torrent-item"><div class="torrent-name">❌ Žádné torrenty nebyly nalezeny</div></div>';
-      return;
-    }
-
-    container.innerHTML = torrents.map(t => `
-      <div class="torrent-item">
-        <div class="torrent-name">${t.name}</div>
-        <div class="torrent-meta">
-          <span>📦 ${t.size || 'N/A'}</span>
-          <span>🌱 ${t.seeders || 0} seeders</span>
-          <span>📥 ${t.leechers || 0} leechers</span>
-          <span>📡 ${t.source}</span>
-        </div>
-        <button onclick="playSeasonTorrentAjax('${encodeURIComponent(t.magnet)}')" class="play-btn">
-          ▶️ Přehrát
-        </button>
-      </div>
-    `).join('');
-  }
-
-  async function submitSeasonMagnet(event) {
-    event.preventDefault();
-
-    const magnetInput = document.getElementById('season-magnet-input');
-    const magnet = magnetInput.value.trim();
-
-    if (!magnet) return;
-
-    await playSeasonTorrentAjax(magnet);
-  }
-
-  async function playSeasonTorrentAjax(magnetOrEncoded) {
-    const magnet = magnetOrEncoded.startsWith('magnet:') ? magnetOrEncoded : decodeURIComponent(magnetOrEncoded);
-    const submitBtn = document.getElementById('season-magnet-submit');
-    const messagesDiv = document.getElementById('season-stream-messages');
-
-    submitBtn.textContent = '⏳ Zpracovávám torrent...';
-    submitBtn.disabled = true;
-    messagesDiv.innerHTML = '<div class="loading">🔄 Přidávám torrent do TorrServeru...</div>';
-
-    try {
-      const response = await fetch('/api/play-torrent', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ magnet: magnet })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        messagesDiv.innerHTML = '<div class="success">✅ ' + (result.message || 'Stream celé sezóny je připraven!') + '</div>';
-        showSeasonPlayer(result.stream_url, result.hash, result.warning);
-        document.getElementById('season-magnet-input').value = '';
-      } else {
-        messagesDiv.innerHTML = '<div class="error">❌ ' + (result.error || 'Neznámá chyba') + '</div>';
-      }
-    } catch (error) {
-      messagesDiv.innerHTML = '<div class="error">❌ Síťová chyba: ' + error.message + '</div>';
-    }
-
-    submitBtn.textContent = '▶️ Spustit stream celé sezóny';
-    submitBtn.disabled = false;
-  }
-
-  function showSeasonPlayer(streamUrl, hash, warning) {
-    currentSeasonStreamUrl = streamUrl;
-
-    const playerSection = document.getElementById('season-video-section');
-    const player = document.getElementById('season-player');
-    const infoContent = document.getElementById('season-stream-info');
-
-    player.innerHTML = `
-      <source src="${streamUrl}" type="video/mp4">
-      <source src="${streamUrl}" type="application/x-mpegURL">
-      <p>Váš prohlížeč nepodporuje video přehrávání.</p>
-    `;
-
-    infoContent.innerHTML = `
-      <div class="info-item">
-        <strong>💡 Stream URL:</strong>
-        <a href="${streamUrl}" target="_blank">${streamUrl.substr(0, 50)}...</a>
-      </div>
-      <div class="info-item">
-        <strong>🏠 TorrServer:</strong> {{ torrserver_url }}
-      </div>
-      ${hash ? `<div class="info-item"><strong>📦 Hash:</strong> ${hash.substr(0, 16)}...</div>` : ''}
-      ${warning ? `<div class="warning">⚠️ ${warning}</div>` : ''}
-      <div class="info-tip">
-        💡 <strong>Tip:</strong> Pokud se stream nenačítá, počkej 10-30 sekund a klikni "Znovu načíst"
-      </div>
-    `;
-
-    playerSection.style.display = 'block';
-    playerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    player.load();
-    setTimeout(() => {
-      player.play().catch(e => console.log('Autoplay failed:', e));
-    }, 1000);
-  }
-
-  function retrySeasonStream() {
-    const player = document.getElementById('season-player');
-    if (player && currentSeasonStreamUrl) {
-      console.log('🔄 Restarting season stream...');
-      player.load();
-      setTimeout(() => {
-        player.play().catch(e => console.log('Autoplay failed:', e));
-      }, 2000);
-    }
-  }
-
-  async function testSeasonStream() {
-    if (!currentSeasonStreamUrl) {
-      alert('❌ Žádná stream URL není dostupná');
-      return;
-    }
-
-    try {
-      const response = await fetch(currentSeasonStreamUrl, { method: 'HEAD' });
-      if (response.ok || response.status === 206) {
-        alert('✅ Stream URL je dostupná a funguje!');
-      } else {
-        alert(`⚠️ Stream URL odpovídá s HTTP ${response.status}. Možná se ještě načítá.`);
-      }
-    } catch (error) {
-      alert('❌ Stream URL není dostupná: ' + error.message);
-    }
-  }
-
-  async function checkTorrServer() {
-    try {
-      const response = await fetch('/api/torrserver-status');
-      const status = await response.json();
-      if (status.status === 'online') {
-        alert('✅ TorrServer je online a funguje');
-      } else {
-        alert('❌ TorrServer není dostupný na ' + status.url);
-      }
-    } catch {
-      alert('❌ Nelze zkontrolovat TorrServer');
-    }
-  }
-  </script>
 {% endblock %}

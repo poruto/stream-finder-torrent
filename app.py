@@ -351,18 +351,30 @@ def episode_torrents():
             'tmdb_id': request.args.get('tmdb_id', type=int)
         })
 
+        # Převeď season a episode na integers pro JavaScript
+        try:
+            season_int = int(params['season'])
+            episode_int = int(params['episode'])
+        except (ValueError, TypeError):
+            return "Invalid season/episode numbers", 400
+
         return render_template(
             'title.html',
             mode='episode_torrents',
             media_type='tv',
-            TORRSERVER_URL=TORRSERVER_URL,
-            **params
+            season=season_int,  # Číselná hodnota
+            episode=episode_int,  # Číselná hodnota
+            title=params['title'],
+            english_title=params['english_title'],
+            episode_name=params['episode_name'],
+            tmdb_id=params['tmdb_id'],
+            year='',  # Prázdný rok pro epizody
+            TORRSERVER_URL=TORRSERVER_URL
         )
 
     except Exception as e:
         print(f"Error in episode_torrents: {e}")
         return f"Error: {str(e)}", 500
-
 
 @app.route('/api/torrents', methods=['POST'])
 def search_torrents_api():
