@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}StreamFinder{% endblock %}</title>
   <meta name="theme-color" content="#141414">
+  <!-- "Add to home screen" on phones and TVs: own icon, opens without the browser bar -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e5383b'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
