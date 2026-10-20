@@ -4,6 +4,7 @@ Endpoints used (all verified against TorrServer MatriX.136):
   POST /torrents {"action": "add" | "get" | "list" | "drop" | "rem", ...}
   GET  /stream/<name>?link=<hash>&index=<file id>&play   (supports HTTP Range)
   GET  /echo
+  POST /settings {"action": "get" | "set", "sets": {...}}   ("set" replaces all settings)
 """
 
 import base64
@@ -27,6 +28,27 @@ FILES_TTL = 600  # seconds a torrent's file list is reused (it never changes)
 _BTIH_RE = re.compile(r"urn:btih:([a-zA-Z0-9]{32,40})", re.IGNORECASE)
 _HEX40_RE = re.compile(r"^[a-fA-F0-9]{40}$")
 _BASE32_RE = re.compile(r"^[A-Za-z2-7]{32}$")
+
+# "Download ahead" choice -> (ReaderReadAHead %, PreloadCache %) of TorrServer's cache.
+# "normal" is TorrServer's default; "less" fetches less that may never be watched,
+# which also suits the small cache of a Raspberry Pi.
+READ_AHEAD = {"normal": (95, 50), "less": (50, 20)}
+
+
+def network_settings(upload: str, read_ahead: str) -> dict[str, Any]:
+    """TorrServer settings for the Server settings choices (empty = leave them alone).
+
+    `upload`: kB/s as text, "0" = unlimited, "off" = no upload at all.
+    """
+    sets: dict[str, Any] = {}
+    upload = (upload or "").strip().lower()
+    if upload == "off":
+        sets.update(DisableUpload=True, UploadRateLimit=0)
+    elif upload.isdigit():
+        sets.update(DisableUpload=False, UploadRateLimit=int(upload))
+    if read_ahead in READ_AHEAD:
+        sets["ReaderReadAHead"], sets["PreloadCache"] = READ_AHEAD[read_ahead]
+    return sets
 
 
 class TorrServerError(Exception):
@@ -157,10 +179,15 @@ class TorrServerClient:
         self.session.mount("https://", HTTPAdapter(pool_maxsize=32))
         self._files: LRU = LRU(64)  # info hash -> (valid until, file list)
 
-    def _post(self, payload: dict[str, Any], timeout: int | None = None) -> Any:
+    def _post(
+        self,
+        payload: dict[str, Any],
+        timeout: int | None = None,
+        path: str = "/torrents",
+    ) -> Any:
         try:
             response = self.session.post(
-                f"{self.base_url}/torrents",
+                f"{self.base_url}{path}",
                 json=payload,
                 timeout=timeout or self.timeout,
             )
@@ -183,6 +210,22 @@ class TorrServerClient:
             )
         except requests.RequestException:
             return False
+
+    def settings(self) -> dict[str, Any]:
+        return self._post({"action": "get"}, path="/settings") or {}
+
+    def update_settings(self, changes: dict[str, Any]) -> bool:
+        """Merge `changes` into TorrServer's settings; True when something changed.
+
+        A "set" replaces every setting, so the current ones are read and sent back too.
+        """
+        current = self.settings()
+        if not current:
+            raise TorrServerError("TorrServer returned no settings")
+        if all(current.get(key) == value for key, value in changes.items()):
+            return False
+        self._post({"action": "set", "sets": {**current, **changes}}, path="/settings")
+        return True
 
     def add(self, magnet: str, title: str = "", poster: str = "") -> str:
         """Add (or re-open) a torrent; returns its info hash."""

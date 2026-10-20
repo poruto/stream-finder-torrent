@@ -29,6 +29,7 @@ def create_app(testing: bool = False) -> Flask:
         not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     ):
         services.imdb.start()
+        services.apply_network_later()  # upload limit / read-ahead from Server settings
     app.extensions["streamfinder"] = services
 
     from .api import api

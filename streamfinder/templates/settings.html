@@ -33,7 +33,7 @@
         <legend>{{ t('quality_legend') }}</legend>
         <p class="muted">{{ t('quality_help') }}</p>
         <div class="choice-list">
-          {% for value in ['auto', '1080', '2160', '720'] %}
+          {% for value in ['auto', '1080', '2160', '720', 'saver'] %}
             <label class="choice">
               <input type="radio" name="quality" value="{{ value }}">
               <span><strong>{{ t('quality_' ~ value) }}</strong><small>{{ t('quality_' ~ value ~ '_text') }}</small></span>
@@ -234,6 +234,29 @@
         <button class="key-remove" type="button" data-remove="transcribe" hidden>{{ t('key_remove_ai') }}</button>
         <p class="key-message" aria-live="polite"></p>
       </form>
+
+        <form class="key-form" data-field="torrserver">
+          <div class="key-head"><strong>{{ t('net_title') }}</strong></div>
+          <p class="muted">{{ t('net_help') }}</p>
+          <div class="setting-row">
+            <label for="net-upload">{{ t('upload_limit') }}</label>
+            <select id="net-upload" name="torrserver_upload">
+              <option value="0">{{ t('upload_unlimited') }}</option>
+              {% for n in [1000, 300, 100] %}<option value="{{ n }}">{{ t('upload_kbps', n=n) }}</option>{% endfor %}
+              <option value="off">{{ t('upload_off') }}</option>
+            </select>
+          </div>
+          <p class="muted">{{ t('upload_help') }}</p>
+          <div class="setting-row">
+            <label for="net-read-ahead">{{ t('read_ahead') }}</label>
+            <select id="net-read-ahead" name="torrserver_read_ahead">
+              {% for value in ['normal', 'less'] %}<option value="{{ value }}">{{ t('read_ahead_' ~ value) }}</option>{% endfor %}
+            </select>
+          </div>
+          <p class="muted">{{ t('read_ahead_help') }}</p>
+          <div class="key-row"><button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button></div>
+          <p class="key-message" aria-live="polite"></p>
+        </form>
 
         <form class="key-form" id="admin-credentials">
           <div class="key-head"><strong>{{ t('admin_account') }}</strong></div>

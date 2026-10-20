@@ -315,3 +315,79 @@ def test_local_whisper_down_without_a_key_still_fails(monkeypatch):
         assert "unreachable" in str(e)
     else:
         raise AssertionError("expected TranscribeError")
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self.status_code = 200
+        self.data = data
+        self.content = b"{}" if data is not None else b""
+        self.text = ""
+
+    def json(self):
+        return self.data
+
+
+class _FakeSession:
+    """Answers TorrServer's /settings like MatriX: "get" returns all settings."""
+
+    def __init__(self, current):
+        self.current = current
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None):
+        self.posts.append((url, json))
+        if json["action"] == "get":
+            return _FakeResponse(dict(self.current))
+        self.current = json["sets"]
+        return _FakeResponse(None)
+
+
+def test_network_settings_choices():
+    from streamfinder.torrserver import network_settings
+
+    assert network_settings("", "") == {}
+    assert network_settings("0", "") == {"DisableUpload": False, "UploadRateLimit": 0}
+    assert network_settings("300", "normal") == {
+        "DisableUpload": False,
+        "UploadRateLimit": 300,
+        "ReaderReadAHead": 95,
+        "PreloadCache": 50,
+    }
+    assert network_settings("off", "less") == {
+        "DisableUpload": True,
+        "UploadRateLimit": 0,
+        "ReaderReadAHead": 50,
+        "PreloadCache": 20,
+    }
+
+
+def test_torrserver_settings_are_merged_not_replaced():
+    from streamfinder.torrserver import TorrServerClient, network_settings
+
+    client = TorrServerClient("http://ts:8090")
+    current = {
+        "CacheSize": 67108864,
+        "ReaderReadAHead": 95,
+        "PreloadCache": 50,
+        "UploadRateLimit": 0,
+        "DisableUpload": False,
+        "TorrentDisconnectTimeout": 30,
+    }
+    client.session = _FakeSession(current)
+    assert client.update_settings(network_settings("100", "less"))
+    url, payload = client.session.posts[-1]
+    assert url == "http://ts:8090/settings"
+    assert payload == {
+        "action": "set",
+        "sets": {
+            **current,
+            "UploadRateLimit": 100,
+            "ReaderReadAHead": 50,
+            "PreloadCache": 20,
+        },
+    }
+    # Already applied: nothing is sent again.
+    posts = len(client.session.posts)
+    assert not client.update_settings(network_settings("100", "less"))
+    assert len(client.session.posts) == posts + 1  # only the "get"

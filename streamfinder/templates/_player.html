@@ -128,7 +128,7 @@
       <label class="sheet-quality">
         {{ t('preferred_quality') }}
         <select id="sheet-quality">
-          {% for value in ['auto', '1080', '2160', '720'] %}<option value="{{ value }}">{{ t('quality_' ~ value) }}</option>{% endfor %}
+          {% for value in ['auto', '1080', '2160', '720', 'saver'] %}<option value="{{ value }}">{{ t('quality_' ~ value) }}</option>{% endfor %}
         </select>
       </label>
       <div id="versions-status" class="versions-status"></div>

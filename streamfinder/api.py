@@ -37,6 +37,7 @@ from .subtitles.whisper_models import MODELS as WHISPER_MODELS
 from .tmdb import TMDBError, match_titles
 from .torrents import SearchQuery
 from .torrserver import (
+    READ_AHEAD,
     TorrServerError,
     normalize_magnet,
     select_video_file,
@@ -137,7 +138,8 @@ def season(tmdb_id: int, season_number: int):
 
 @api.route("/torrents", methods=["POST"])
 def torrents():
-    """Body: {tmdb_id, media_type, season?, episode?, runtime?, quality?, query?}; `query` = free text."""
+    """Body: {tmdb_id, media_type, season?, episode?, runtime?, quality?, hevc?, query?};
+    `query` = free text, quality "saver" = smallest good version, `hevc` = the browser decodes HEVC."""
     body = _body()
     media_type = _media_type(body.get("media_type"))
     tmdb_id = _int(body.get("tmdb_id"))
@@ -146,6 +148,7 @@ def torrents():
     runtime = _int(body.get("runtime"))
     quality = _int(body.get("quality"))
     quality = quality if quality in (2160, 1080, 720) else None
+    saver = body.get("quality") == "saver"
 
     data = services().tmdb.details(media_type, tmdb_id) if tmdb_id else {}
     # Episode counts let packs be judged by size per episode, not total size.
@@ -160,6 +163,8 @@ def torrents():
         season=season,
         episode=episode,
         quality=quality,
+        saver=saver,
+        hevc=saver and bool(body.get("hevc")),
         season_episodes=season_counts,
         total_episodes=data.get("number_of_episodes"),
         runtime=runtime
@@ -680,6 +685,8 @@ def _key_status() -> dict:
         "transcribe_local": config.TRANSCRIBE_API_URL,  # an address on the LAN, not a secret
         "transcribe_provider": services().transcriber.provider,
         "sktorrent": bool(config.SKTORRENT_USERNAME and config.SKTORRENT_PASSWORD),
+        "torrserver_upload": config.TORRSERVER_UPLOAD_LIMIT or "0",
+        "torrserver_read_ahead": config.TORRSERVER_READ_AHEAD or "normal",
     }
 
 
@@ -694,7 +701,8 @@ def keys_status():
 @admin_required
 def keys_update():
     """Body: any of {tmdb_api_key, opensubtitles_api_key, opensubtitles_username, opensubtitles_password,
-    transcribe_api_key} plus optional remove: ["opensubtitles", "transcribe"].
+    transcribe_api_key, torrserver_upload, torrserver_read_ahead} plus optional
+    remove: ["opensubtitles", "transcribe"].
     Every new key is tested before it is saved."""
     body = _body()
     svc = services()
@@ -847,11 +855,33 @@ def keys_update():
             OPENSUBTITLES_PASSWORD="",
         )
 
+    # Network use: TorrServer's upload limit (kB/s, "0" = unlimited, "off") and read-ahead.
+    # Only real changes are saved, so TorrServer's own settings stay until one is picked.
+    upload = value("torrserver_upload").lower()
+    if upload:
+        if upload != "off" and not upload.isdigit():
+            return jsonify(
+                success=False, field="torrserver", error=t("upload_invalid")
+            ), 400
+        upload = upload if upload == "off" else str(int(upload))
+        if upload != (config.TORRSERVER_UPLOAD_LIMIT or "0"):
+            changes["TORRSERVER_UPLOAD_LIMIT"] = upload
+    read_ahead = value("torrserver_read_ahead")
+    if read_ahead in READ_AHEAD and read_ahead != (
+        config.TORRSERVER_READ_AHEAD or "normal"
+    ):
+        changes["TORRSERVER_READ_AHEAD"] = read_ahead
+
     if changes:
         config.save_settings(changes)
         svc.apply_keys()
         logger.info("API keys updated: %s", ", ".join(sorted(changes)))
-    return jsonify(success=True, **_key_status())
+    status = _key_status()
+    network = {"TORRSERVER_UPLOAD_LIMIT", "TORRSERVER_READ_AHEAD"} & changes.keys()
+    if network and not svc.apply_network(attempts=1):
+        svc.apply_network_later()  # TorrServer is down: as soon as it is back
+        status["notice"] = "torrserver_pending"
+    return jsonify(success=True, **status)
 
 
 @api.route("/admin/login", methods=["POST"])

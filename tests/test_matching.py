@@ -321,9 +321,84 @@ def test_slash_in_name_keeps_the_part_with_the_year():
 
 def test_sequel_number_with_the_films_own_year_is_kept():
     alien3 = MatchTarget(titles=["Alien³"], year=1992, media_type="movie")
-    assert score_torrent(parse_release("Alien.3.1992.1080p.BluRay.x264"), 50, 2 * 1024**3, alien3) is not None
+    assert (
+        score_torrent(
+            parse_release("Alien.3.1992.1080p.BluRay.x264"), 50, 2 * 1024**3, alien3
+        )
+        is not None
+    )
     scream = MatchTarget(titles=["Scream"], year=2022, media_type="movie")
-    assert score_torrent(parse_release("Scream.5.2022.1080p.WEB-DL"), 50, 2 * 1024**3, scream) is not None
+    assert (
+        score_torrent(
+            parse_release("Scream.5.2022.1080p.WEB-DL"), 50, 2 * 1024**3, scream
+        )
+        is not None
+    )
     # Still rejected: a sequel from another year.
     scream_1996 = MatchTarget(titles=["Scream"], year=1996, media_type="movie")
-    assert score_torrent(parse_release("Scream.2.1997.1080p.BluRay"), 50, 2 * 1024**3, scream_1996) is None
+    assert (
+        score_torrent(
+            parse_release("Scream.2.1997.1080p.BluRay"), 50, 2 * 1024**3, scream_1996
+        )
+        is None
+    )
+
+
+def test_data_saver_picks_small_hevc_when_the_browser_decodes_it():
+    from streamfinder.torrents.providers import RawTorrent
+    from streamfinder.torrents.search import SearchQuery, TorrentSearcher, choose_picks
+
+    gib = 1024**3
+    raw = [
+        RawTorrent(
+            "Dune.2021.1080p.WEBRip.x264.AAC", "a" * 40, 4 * gib, 400, 10, "YTS"
+        ),
+        RawTorrent(
+            "Dune.2021.1080p.WEB-DL.DDP5.1.x265-X",
+            "b" * 40,
+            int(2.2 * gib),
+            60,
+            5,
+            "TPB",
+        ),
+        RawTorrent(
+            "Dune.2021.720p.WEBRip.x264.AAC", "c" * 40, int(1.9 * gib), 90, 5, "YTS"
+        ),
+        RawTorrent(
+            "Dune.2021.2160p.WEB-DL.DDP5.1.HEVC-X", "d" * 40, 15 * gib, 300, 5, "TPB"
+        ),
+        RawTorrent("Dune.2021.HDCAM.x264", "e" * 40, int(0.7 * gib), 2000, 50, "TPB"),
+        RawTorrent("Dune.2021.480p.x264", "f" * 40, int(0.5 * gib), 500, 5, "TPB"),
+    ]
+
+    def recommended(**options):
+        query = SearchQuery(
+            title="Dune", titles=["Dune"], year=2021, runtime=120, **options
+        )
+        ranked = TorrentSearcher._rank(raw, query)
+        return choose_picks(ranked, query.quality, saver=query.saver, hevc=query.hevc)[
+            "recommended"
+        ]
+
+    assert recommended() == "a" * 40  # the other choices are unchanged
+    assert recommended(saver=True, hevc=True) == "b" * 40
+    # HEVC the browser can't decode: the small x264 720p instead.
+    assert recommended(saver=True, hevc=False) == "c" * 40
+
+
+def test_data_saver_keeps_availability_rules():
+    from streamfinder.torrents.providers import RawTorrent
+    from streamfinder.torrents.search import SearchQuery, TorrentSearcher, choose_picks
+
+    gib = 1024**3
+    raw = [
+        RawTorrent(
+            "Dune.2021.1080p.WEBRip.x264.AAC", "a" * 40, 4 * gib, 400, 10, "YTS"
+        ),
+        RawTorrent("Dune.2021.1080p.WEB.x265-X", "b" * 40, 2 * gib, 2, 1, "TPB"),
+    ]
+    query = SearchQuery(
+        title="Dune", titles=["Dune"], year=2021, runtime=120, saver=True, hevc=True
+    )
+    picks = choose_picks(TorrentSearcher._rank(raw, query), saver=True, hevc=True)
+    assert picks["recommended"] == "a" * 40  # the small one has too few sources

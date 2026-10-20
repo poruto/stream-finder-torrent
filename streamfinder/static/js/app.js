@@ -273,10 +273,12 @@
     get: () => ({ ...DEFAULT_SETTINGS, ...settingsStore.read() }),
     set: (changes) => settingsStore.write({ ...SF.settings.get(), ...changes }),
     czech: () => SF.settings.get().versionLang === "cs",
-    quality: () =>
-      SF.settings.get().quality === "auto"
-        ? null
-        : Number(SF.settings.get().quality),
+    // null = automatic, "saver" = smallest version that looks fine, else a resolution
+    quality: () => {
+      const quality = SF.settings.get().quality;
+      if (quality === "auto") return null;
+      return quality === "saver" ? quality : Number(quality);
+    },
     languages() {
       const { primary, fallback } = SF.settings.get();
       return [
@@ -336,6 +338,15 @@
         badge.textContent = ok ? t("key_set") : t("key_missing");
         badge.dataset.ok = String(ok);
       }
+      // Network use: the saved choices, also as the default a form reset returns to.
+      for (const name of ["torrserver_upload", "torrserver_read_ahead"]) {
+        const select = keysSection.querySelector(`select[name="${name}"]`);
+        if (!select || state[name] === undefined) continue;
+        let option = [...select.options].find((o) => o.value === state[name]);
+        if (!option) option = select.appendChild(new Option(t("upload_kbps", { n: state[name] }), state[name]));
+        for (const o of select.options) o.defaultSelected = o === option;
+        select.value = option.value;
+      }
       for (const remove of keysSection.querySelectorAll("[data-remove]")) {
         remove.hidden = !state[remove.dataset.remove];
       }
@@ -391,7 +402,7 @@
         renderState(state);
         form.reset();
         message.className = "key-message ok";
-        message.textContent = t("key_saved");
+        message.textContent = t(state.notice || "key_saved");
         if (
           form.dataset.field === "tmdb" &&
           new URLSearchParams(location.search).get("setup")
@@ -412,6 +423,10 @@
       ?.addEventListener("change", (event) =>
         event.target.form.requestSubmit(),
       );
+    // So do the network choices.
+    keysSection
+      .querySelector('[data-field="torrserver"]')
+      ?.addEventListener("change", (event) => event.target.form.requestSubmit());
 
     for (const form of keysSection.querySelectorAll(".key-form")) {
       form.addEventListener("submit", (event) => {

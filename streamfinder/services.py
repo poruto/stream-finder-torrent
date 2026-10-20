@@ -1,5 +1,8 @@
 """Long-lived service objects shared by all requests."""
 
+import logging
+import threading
+import time
 from dataclasses import dataclass
 
 from flask import current_app
@@ -12,8 +15,12 @@ from .subtitles.translate import Translator
 from .subtitles.whisper_models import WhisperModels
 from .tmdb import TMDBClient, tmdb_client
 from .torrents import TorrentSearcher
-from .torrserver import TorrServerClient
+from .torrserver import TorrServerClient, TorrServerError, network_settings
 from .transcode import Transcoder
+
+logger = logging.getLogger(__name__)
+
+NETWORK_RETRY = 10  # seconds between attempts to reach TorrServer for its settings
 
 
 @dataclass
@@ -73,6 +80,34 @@ class Services:
             config.TRANSCRIBE_PROVIDER,
             config.flag(config.TRANSCRIBE_ENABLED),
         )
+
+    def apply_network(self, attempts: int = 30) -> bool:
+        """Send the upload limit / read-ahead choices to TorrServer; True once it has them.
+
+        TorrServer may start after this app, so it is tried `attempts` times. The choices
+        are read again on every attempt: one saved meanwhile must not be overwritten.
+        """
+        for attempt in range(attempts):
+            changes = network_settings(
+                config.TORRSERVER_UPLOAD_LIMIT, config.TORRSERVER_READ_AHEAD
+            )
+            if not changes:
+                return True
+            try:
+                if self.torrserver.update_settings(changes):
+                    logger.info("TorrServer settings updated: %s", changes)
+                return True
+            except (TorrServerError, ValueError) as e:  # offline, or not MatriX
+                if attempt + 1 < attempts:
+                    time.sleep(NETWORK_RETRY)
+                else:
+                    logger.warning("TorrServer settings not applied: %s", e)
+        return False
+
+    def apply_network_later(self) -> None:
+        threading.Thread(
+            target=self.apply_network, name="torrserver-settings", daemon=True
+        ).start()
 
 
 def services() -> Services:

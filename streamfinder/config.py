@@ -44,6 +44,11 @@ TORRSERVER_URL = os.getenv("TORRSERVER_URL", "http://127.0.0.1:8090").rstrip("/"
 # URL the *browser* uses for streams; empty = same host as this app, TorrServer port.
 TORRSERVER_PUBLIC_URL = os.getenv("TORRSERVER_PUBLIC_URL", "").rstrip("/")
 TORRSERVER_STREAM_PATH = os.getenv("TORRSERVER_STREAM_PATH", "/stream")
+# Network use, sent to TorrServer's settings: upload limit in kB/s ("0" = unlimited,
+# "off" = no upload) and how much it downloads ahead ("normal" / "less").
+# Empty = leave TorrServer's own settings alone.
+TORRSERVER_UPLOAD_LIMIT = os.getenv("TORRSERVER_UPLOAD_LIMIT", "").strip().lower()
+TORRSERVER_READ_AHEAD = os.getenv("TORRSERVER_READ_AHEAD", "").strip().lower()
 
 # Torrent search
 TORRENT_TIMEOUT = _env_int("TORRENT_TIMEOUT", 10)
@@ -112,6 +117,8 @@ EDITABLE_KEYS = (
     "TRANSCRIBE_ENABLED",
     "SKTORRENT_USERNAME",
     "SKTORRENT_PASSWORD",
+    "TORRSERVER_UPLOAD_LIMIT",
+    "TORRSERVER_READ_AHEAD",
 )
 
 

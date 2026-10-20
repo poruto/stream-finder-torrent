@@ -5,6 +5,8 @@ offer one obvious Play button and explain the choice:
   recommended   best overall for streaming (quality x availability x browser support)
   best_quality  highest resolution that still has enough seeders
   smallest      a much smaller file for slow connections
+With the "data saver" preference the recommended version is the smallest one that
+still looks fine: HEVC/AV1 720p/1080p at about 1 GB per hour, then small x264.
 CAM/telesync and dead torrents are flagged `low` so the UI can tuck them away
 whenever a proper release exists.
 """
@@ -54,6 +56,12 @@ MIN_STREAM_SEEDERS = 3
 # Largest sensible size per hour of video for each quality preference (GB/h).
 # 1080p web releases are ~1.5-4 GB/h, Blu-ray encodes up to ~8, remuxes 15-30.
 GB_PER_HOUR_CAP = {None: 6.0, 1080: 8.0, 2160: 25.0, 720: 2.5}
+# Data saver: HEVC/AV1 up to this size per hour still looks fine at 720p/1080p
+# (x264 needs about twice as much for the same picture); much smaller is a blurry re-encode.
+SAVER_GB_PER_HOUR = 1.2
+SAVER_MIN_GB_PER_HOUR = 0.3
+SAVER_CAP = 2.5  # larger counts as oversized in data saver mode
+SAVER_BONUS = (15, 10, 4, 0)  # ranking bonus by saver_tier()
 
 _QUALITY_RANK = {"4K": 4, "1080p": 3, "720p": 2, "SD": 1, "CAM": 0}
 _SOURCE_RANK = {
@@ -98,6 +106,28 @@ def czech_bonus(info: ReleaseInfo) -> float:
     return 14.0 if kind == "dub" else 6.0
 
 
+def video_plays(info: ReleaseInfo, hevc: bool) -> bool:
+    """Can the browser decode the picture? HEVC only where the browser said it can
+    (the sound is converted when needed, the picture never is)."""
+    if info.codec == "XviD":
+        return False
+    return info.codec != "HEVC" or hevc
+
+
+def saver_tier(info: ReleaseInfo, gb_per_hour: float | None, hevc: bool) -> int:
+    """Data saver: 0 small HEVC/AV1, 1 other small HD, 2 HD up to SAVER_CAP, 3 the rest."""
+    if (
+        not gb_per_hour
+        or gb_per_hour > SAVER_CAP
+        or (info.resolution or 0) not in (720, 1080)
+        or not video_plays(info, hevc)
+    ):
+        return 3
+    if SAVER_MIN_GB_PER_HOUR <= gb_per_hour <= SAVER_GB_PER_HOUR:
+        return 0 if info.codec in ("HEVC", "AV1") else 1
+    return 2
+
+
 def build_magnet(info_hash: str, name: str) -> str:
     return f"magnet:?xt=urn:btih:{info_hash}&dn={quote(name)}" + "".join(
         f"&tr={quote(t)}" for t in TRACKERS
@@ -117,6 +147,9 @@ class SearchQuery:
     quality: int | None = (
         None  # preferred resolution: 2160 / 1080 / 720, None = automatic
     )
+    # Data saver: the smallest version that looks fine; `hevc` = the browser decodes HEVC.
+    saver: bool = False
+    hevc: bool = False
     season_episodes: dict[int, int] = field(
         default_factory=dict
     )  # season -> episode count
@@ -185,6 +218,8 @@ class SearchQuery:
             self.free_text,
             self.quality,
             self.czech,
+            self.saver,
+            self.hevc,
         )
 
 
@@ -268,7 +303,11 @@ class TorrentResult:
 
 
 def choose_picks(
-    ranked: list[TorrentResult], quality: int | None = None, czech: bool = False
+    ranked: list[TorrentResult],
+    quality: int | None = None,
+    czech: bool = False,
+    saver: bool = False,
+    hevc: bool = False,
 ) -> dict[str, str | None]:
     """Pick the recommended / best-quality / smallest versions (by info hash)."""
     playable = [
@@ -293,6 +332,9 @@ def choose_picks(
             if (r.info.resolution or 0) == quality and r.raw.seeders >= 5
         ]
         candidates = preferred or playable
+    if saver:
+        # A small file is no use if the browser can't show the picture.
+        candidates = [r for r in candidates if video_plays(r.info, hevc)] or candidates
     # The player is a browser: prefer a version it can decode if one is reasonably available.
     # 4K is the exception: those are nearly always HEVC, so a 4K fan gets 4K even if it needs VLC.
     in_browser = [
@@ -303,8 +345,18 @@ def choose_picks(
     dubbed = [
         r for r in candidates if czech_kind(r.info) == "dub" and r.raw.seeders >= 5
     ]
-    if czech and dubbed:
+    # Data saver: the smallest tier that has a well-seeded version, the best ranked in it.
+    tier = lambda r: saver_tier(r.info, r.gb_per_hour, hevc)
+    small = (
+        [r for r in candidates if r.raw.seeders >= 5 and tier(r) < 3] if saver else []
+    )
+    small_dubbed = [r for r in small if czech_kind(r.info) == "dub"]
+    if czech and small_dubbed:
+        recommended = min(small_dubbed, key=lambda r: (tier(r), -r.score))
+    elif czech and dubbed:
         recommended = dubbed[0]
+    elif small:
+        recommended = min(small, key=lambda r: (tier(r), -r.score))
     elif in_browser and quality != 2160:
         recommended = in_browser[0]
     else:
@@ -409,7 +461,9 @@ class TorrentSearcher:
         ranked = self._rank(raw, query)
         result = {
             "results": [r.to_dict() for r in ranked[: config.MAX_TORRENT_RESULTS]],
-            "picks": choose_picks(ranked, query.quality, query.czech),
+            "picks": choose_picks(
+                ranked, query.quality, query.czech, query.saver, query.hevc
+            ),
             "notice": notice_for(ranked),
             "total_found": len({r.info_hash for r in raw}),
             "failed_providers": sorted(failed),
@@ -474,7 +528,12 @@ class TorrentSearcher:
                 result.per_episode = item.size // episodes
             if query.czech:
                 result.score = round(result.score + czech_bonus(info), 1)
-            cap = GB_PER_HOUR_CAP[query.quality]
+            if query.saver:
+                # Smaller ranks higher in the list too (the pick goes by tier first).
+                tier = saver_tier(info, result.gb_per_hour, query.hevc)
+                size_penalty = min(12.0, 5 * (result.gb_per_hour or 0))
+                result.score = round(result.score + SAVER_BONUS[tier] - size_penalty, 1)
+            cap = SAVER_CAP if query.saver else GB_PER_HOUR_CAP[query.quality]
             if result.gb_per_hour and result.gb_per_hour > cap:
                 result.oversized = True
                 result.score = round(

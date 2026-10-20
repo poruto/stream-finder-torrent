@@ -71,3 +71,35 @@ def test_first_run_redirects_to_settings(client, monkeypatch):
         and "/settings?setup=1" in response.headers["Location"]
     )
     assert client.get("/settings").status_code == 200
+
+
+def test_network_settings_are_saved_and_sent_to_torrserver(
+    client, monkeypatch, tmp_path
+):
+    svc = client.application.extensions["streamfinder"]
+    sent = []
+    monkeypatch.setattr(svc.torrserver, "update_settings", sent.append)
+    for key in ("TORRSERVER_UPLOAD_LIMIT", "TORRSERVER_READ_AHEAD"):
+        monkeypatch.setattr(config, key, "")
+        monkeypatch.setenv(key, "")  # saving sets them, this restores them afterwards
+    login(client)
+    # Unchanged defaults are not saved, so TorrServer's own settings stay.
+    client.post(
+        "/api/keys", json={"torrserver_upload": "0", "torrserver_read_ahead": "normal"}
+    )
+    assert not sent
+    response = client.post(
+        "/api/keys", json={"torrserver_upload": "off", "torrserver_read_ahead": "less"}
+    )
+    assert response.get_json()["torrserver_upload"] == "off"
+    assert sent == [
+        {
+            "DisableUpload": True,
+            "UploadRateLimit": 0,
+            "ReaderReadAHead": 50,
+            "PreloadCache": 20,
+        }
+    ]
+    assert "TORRSERVER_UPLOAD_LIMIT=off" in (tmp_path / "settings.env").read_text()
+    bad = client.post("/api/keys", json={"torrserver_upload": "fast"})
+    assert bad.status_code == 400

@@ -87,6 +87,16 @@
       : "";
   const isAired = (date) => Boolean(date) && date <= today;
 
+  // Can this browser decode HEVC (x265)? Data saver then picks small x265 versions.
+  const hevcVideo = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
+  const hevc = (() => {
+    try {
+      return Boolean(window.MediaSource?.isTypeSupported?.(hevcVideo) || document.createElement("video").canPlayType(hevcVideo));
+    } catch {
+      return false;
+    }
+  })();
+
   function findVersions(target, query = "") {
     const quality = SF.settings.quality();
     const czech = SF.settings.czech();
@@ -99,6 +109,7 @@
         episode: target.episode,
         runtime: target.runtime,
         quality,
+        hevc,
         query,
         czech,
       });
@@ -145,7 +156,12 @@
       v.pack ? el("span", {}, [t(`pack_${v.pack}`)]) : null,
       availabilityNode(v),
       el("span", { className: v.oversized ? "size-big" : "" }, [
-        v.per_episode ? t("per_episode", { size: v.per_episode }) : v.size,
+        [
+          v.per_episode ? t("per_episode", { size: v.per_episode }) : v.size,
+          v.gb_per_hour ? t("per_hour", { size: v.gb_per_hour.toLocaleString(SF.lang, { maximumFractionDigits: 1 }) }) : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
       ]),
       v.browser === true
         ? el("span", { className: "browser-ok" }, [t("browser_ok")])
