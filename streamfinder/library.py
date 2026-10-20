@@ -126,6 +126,7 @@ def clear_subtitles():
 # -- backup ---------------------------------------------------------------------------
 
 BACKUP_FORMAT = 1
+ENV_FILE = os.path.join(config.BASE_DIR, ".env")
 
 
 def _backup_keys(with_secrets: bool) -> list[str]:
@@ -134,10 +135,14 @@ def _backup_keys(with_secrets: bool) -> list[str]:
 
 
 def _saved_settings(with_secrets: bool) -> dict[str, str]:
-    """What the Settings page saved into SETTINGS_FILE (only the known settings)."""
-    if not os.path.exists(config.SETTINGS_FILE):
-        return {}
-    saved = dotenv_values(config.SETTINGS_FILE, interpolate=False)
+    """The known settings from .env (where the installers put keys) and SETTINGS_FILE
+    (the Settings page; it wins, as when the app reads them)."""
+    saved: dict = {}
+    for path in dict.fromkeys([ENV_FILE, config.SETTINGS_FILE]):
+        if os.path.exists(path):
+            saved.update(
+                {k: v for k, v in dotenv_values(path, interpolate=False).items() if v}
+            )
     return {k: saved[k] for k in _backup_keys(with_secrets) if saved.get(k) is not None}
 
 

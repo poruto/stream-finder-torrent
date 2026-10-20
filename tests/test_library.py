@@ -43,6 +43,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SUBTITLE_CACHE_DIR", str(tmp_path / "subtitles"))
     monkeypatch.setattr(shared, "PATH", str(tmp_path / "shared.json"))
     monkeypatch.setattr(notify, "STATE", str(tmp_path / "notified.json"))
+    from streamfinder import library
+
+    monkeypatch.setattr(
+        library, "ENV_FILE", str(tmp_path / ".env")
+    )  # never the real one
     auth._failures.clear()
     app = create_app(testing=True)
     fake = FakeTorrServer()
@@ -260,3 +265,15 @@ def test_restore_keeps_only_sane_parts(client, tmp_path, secrets_kept):
         "movie:2": {"updated": 5}
     }
     assert notify._read_notified() == {"5": "S01E01"}
+
+
+def test_backup_also_has_the_keys_the_installer_put_into_env(client, tmp_path):
+    lines = ["TMDB_API_KEY=from-installer", "TRANSCRIBE_ENABLED=true", ""]
+    (tmp_path / ".env").write_text(chr(10).join(lines), encoding="utf-8")
+    (tmp_path / "settings.env").write_text("TRANSCRIBE_ENABLED=false", encoding="utf-8")
+    login(client)
+    plain = client.get("/api/backup").get_json()["settings"]
+    assert plain["TRANSCRIBE_ENABLED"] == "false"  # the Settings page wins over .env
+    assert "TMDB_API_KEY" not in plain
+    with_keys = client.get("/api/backup?keys=1").get_json()["settings"]
+    assert with_keys["TMDB_API_KEY"] == "from-installer"
