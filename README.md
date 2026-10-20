@@ -53,7 +53,7 @@ Afterwards: `streamfinder start | stop | status | update | logs`.
 ### Development
 
 ```sh
-pip install -r requirements.txt
+pip install -r requirements.txt   # on Windows/macOS this also brings ffmpeg
 cp .env.example .env          # TMDB_API_KEY at least
 ./torr/TorrServer-windows-amd64.exe   # or any TorrServer on :8090
 python app.py                 # http://127.0.0.1:5000

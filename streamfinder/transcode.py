@@ -76,9 +76,21 @@ class ProbeResult:
         }
 
 
+def _bundled_ffmpeg() -> str | None:
+    """ffmpeg shipped inside the imageio-ffmpeg wheel (Windows/macOS dev machines)."""
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # not installed, or no binary for this platform
+        return None
+
+
 class Transcoder:
     def __init__(self, ffmpeg: str | None = None, ffprobe: str | None = None):
-        self.ffmpeg = ffmpeg or config.FFMPEG_PATH or shutil.which("ffmpeg")
+        self.ffmpeg = (
+            ffmpeg or config.FFMPEG_PATH or shutil.which("ffmpeg") or _bundled_ffmpeg()
+        )
         self.ffprobe = ffprobe or config.FFPROBE_PATH or shutil.which("ffprobe")
         self._slots = threading.BoundedSemaphore(MAX_SESSIONS)
         self._probes: dict[str, ProbeResult] = {}
