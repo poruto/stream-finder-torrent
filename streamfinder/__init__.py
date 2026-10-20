@@ -32,12 +32,14 @@ def create_app(testing: bool = False) -> Flask:
     app.extensions["streamfinder"] = services
 
     from .api import api
+    from .library import library
     from .shared import shared
     from .views import web
 
     app.register_blueprint(web)
     app.register_blueprint(api)
     app.register_blueprint(shared)
+    app.register_blueprint(library)
 
     # Globals (not a context processor) so that imported macros can translate too.
     app.jinja_env.globals.update(

@@ -38,5 +38,21 @@
         </div>
       </li>
     </ul>
+
+    <section class="library" id="library" aria-labelledby="library-title">
+      <header class="library-head">
+        <h2 id="library-title">{{ t('library_title') }}</h2>
+        <p class="muted" id="library-summary">{{ t('library_loading') }}</p>
+      </header>
+      <ul class="library-disk" id="library-disk" hidden></ul>
+      <div class="library-actions" id="library-actions" hidden>
+        <button class="btn btn-ghost" type="button" id="library-clear-subs">{{ t('library_clear_subs') }}</button>
+        <button class="btn btn-ghost" type="button" id="library-remove-all">{{ t('library_remove_all') }}</button>
+      </div>
+      <ul class="library-list" id="library-list"></ul>
+    </section>
   </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ asset('js/library.js') }}" defer></script>
 {% endblock %}
