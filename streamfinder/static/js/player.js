@@ -49,7 +49,7 @@
     timers: {},
     // Bumped by every play() and by closing the player: older async work sees it and stops.
     playGen: 0,
-    playAbort: null, // AbortController of the pending /api/play
+    playMagnet: null, // torrent the latest play() asked the server for
     subRequest: null, // AbortController of the subtitle download in progress
     convertSeq: 0, // latest startConverted() call; older ones give up
     skipTarget: null, // converted streams: where quick repeated skips are heading
@@ -551,6 +551,10 @@
 
   // ============================================================= player shell
 
+  // This page's id for its conversions on the server: two viewers of one file each get
+  // their own ffmpeg instead of replacing each other's.
+  const VIEWER = Math.random().toString(36).slice(2, 12);
+
   // While the player or the versions sheet is open, everything behind it is inert (no Tab
   // or TV-remote focus there, Space doesn't press a hidden button), and on close focus
   // goes back where it was.
@@ -645,7 +649,6 @@
     if (playerEl.hidden) return;
     // Whatever play() is still waiting for must not start the video behind the page.
     state.playGen += 1;
-    state.playAbort?.abort();
     saveProgress(true);
     if (state.current?.hash) stopTorrent(state.current.hash);
     Object.keys(state.timers).forEach(clearTimer);
@@ -672,6 +675,8 @@
     closeSheet();
     closePlayer();
   });
+  // Reloaded while the player was open: its history entry would need a second Back.
+  if (history.state?.player) history.replaceState(null, "");
   // Leaving the page (or the browser discarding it): keep the position, stop the download.
   window.addEventListener("pagehide", () => {
     saveProgress(true);
@@ -825,7 +830,6 @@
     // episode clicked meanwhile, or the player closed) stops at its next await.
     const gen = ++state.playGen;
     const stale = () => gen !== state.playGen;
-    state.playAbort?.abort();
     closeSheet();
     target = (await resolveEpisode(target)) || target;
     if (stale()) return;
@@ -904,7 +908,7 @@
         "connect",
         torrent.quality ? `${qualityText(torrent)}, ${torrent.size}` : "",
       );
-      const controller = (state.playAbort = new AbortController());
+      state.playMagnet = torrent.magnet;
       const data = await api(
         "/api/play",
         {
@@ -917,12 +921,11 @@
             : ctx.title,
           poster: ctx.poster,
         },
-        { signal: controller.signal },
       );
       if (stale()) {
-        // The player was closed meanwhile: don't let it download for nothing. (When
-        // another play() took over, that one may well be using the same torrent.)
-        if (playerEl.hidden) releaseTorrent(data.hash);
+        // Closed meanwhile, or another play() took over with a different torrent: don't
+        // let this one download for nothing.
+        if (playerEl.hidden || state.playMagnet !== torrent.magnet) releaseTorrent(data.hash);
         return;
       }
       if (
@@ -1115,7 +1118,7 @@
     renderAudioMenu();
     const audio = mode.audio ?? current.audioTrack ?? 0;
     current.convert = { offset: start, duration: current.probe?.duration || 0, copyAudio: mode.copyAudio, audio };
-    const url = `/api/transcode/${current.hash}/${current.file.index}.mp4?start=${start}${mode.copyAudio ? "&copy=1" : ""}${audio ? `&audio=${audio}` : ""}`;
+    const url = `/api/transcode/${current.hash}/${current.file.index}.mp4?start=${start}${mode.copyAudio ? "&copy=1" : ""}${audio ? `&audio=${audio}` : ""}&sid=${VIEWER}`;
     // Land exactly on the requested second once the stream (starting at the keyframe) is playing.
     const skipTo = position - start;
     startVideo(url, skipTo > 0.5 ? skipTo : 0, { keepTracks: true });
@@ -1226,7 +1229,8 @@
     const unsupported = code === 3 || code === 4;
     // A converted stream fails like this too when the server had no free conversion slot
     // (503) or TorrServer stopped delivering: start it again in a moment.
-    if (converted() && (!dur() || brokeOff())) return healConverted({ delay: 3000, unsupported });
+    const played = state.current.started || video.currentTime > 0;
+    if (converted() && played && (!dur() || brokeOff())) return healConverted({ delay: 3000, unsupported });
     showStreamError(unsupported);
   });
 
@@ -1584,7 +1588,7 @@
       const info = current.probe || (await api(`/api/probe/${current.hash}/${current.file.index}`).catch(() => null));
       if (current !== state.current) return;
       if (info?.available) {
-        current.probe = info;
+        if (info.probed) current.probe = info;
         current.audioTrack = preferredAudio(info.audio || []);
         toast(t("converting_audio"));
         startConverted(pos(), { copyAudio: false, audio: current.audioTrack });
@@ -2494,6 +2498,7 @@
   ) {
     const seq = ++sheetSeq;
     sheetTarget = target;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     const opening = sheet.hidden;
     sheet.hidden = false;
     if (opening) openLayer(sheet, sheet.querySelector(".sheet-panel"));
@@ -2741,9 +2746,9 @@
       return;
     }
     if (playerEl.hidden || !sheet.hidden) return;
-    // TV remotes: Down from the player goes to its buttons, Up from the buttons comes back
-    // (where the arrows seek again).
-    if (event.key === "ArrowDown" && event.target === playerEl) {
+    // TV remotes: Down from the player (controls hidden) goes to its buttons, Up from the
+    // buttons comes back (where the arrows seek again).
+    if (event.key === "ArrowDown" && event.target === playerEl && playerEl.classList.contains("is-idle")) {
       const first = [...playerEl.querySelectorAll(".controls-row button")].find((b) => !b.disabled && b.offsetParent !== null);
       if (first) {
         event.preventDefault();
