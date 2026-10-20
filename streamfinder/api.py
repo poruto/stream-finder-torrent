@@ -400,7 +400,8 @@ def ai_subtitles(info_hash: str, index: int):
     """AI subtitles for one window of the playing file, made from its audio.
 
     Query: start, duration (seconds of the file), audio (track number),
-    translate (language code, empty = the spoken language), language (spoken language if known).
+    translate (language code, empty = the spoken language), language (spoken language if known),
+    via (auto | english | direct: let Whisper translate into English first, then Google).
     """
     svc = services()
     if not svc.transcriber.available:
@@ -419,6 +420,9 @@ def ai_subtitles(info_hash: str, index: int):
             translate_to=translate_to if translate_to.isalpha() else "",
             language=language if language.isalpha() else "",
             engine="ai" if request.args.get("engine") == "ai" else "google",
+            via=request.args.get("via")
+            if request.args.get("via") in ("auto", "english", "direct")
+            else "auto",
         )
     except TranscribeError as e:
         logger.info("AI subtitles failed at %.0f s: %s", start, e)

@@ -1528,6 +1528,59 @@ select option:checked {
 .subs-options > .subs-option:first-child + .subs-group {
   border-top: 0;
 }
+.flag {
+  flex: none;
+  width: 24px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  vertical-align: -3px;
+}
+.flag svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.flag-code,
+.flag-badge {
+  background: var(--surface-3);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text);
+}
+.flag-badge {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: none;
+}
+.flag-none {
+  box-shadow: none;
+}
+.subs-option {
+  grid-template-columns: 22px 24px minmax(0, 1fr) !important;
+  align-items: center !important;
+}
+.subs-text {
+  min-width: 0;
+}
+.lang-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.lang-chip small {
+  color: inherit;
+  opacity: 0.6;
+}
+.lang-tag .flag {
+  width: 18px;
+  height: 12px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
 .subs-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1546,17 +1599,6 @@ select option:checked {
 .subs-list {
   display: grid;
   gap: 2px;
-}
-.subs-ai strong::before {
-  content: "AI";
-  margin-right: 8px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--brand);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 800;
-  vertical-align: 2px;
 }
 .subs-more > summary {
   padding: 8px 10px 8px 42px;
@@ -1781,7 +1823,7 @@ select option:checked {
   position: absolute;
   left: 50%;
   bottom: 110px;
-  z-index: 3;
+  z-index: 2; /* under open menus */
   max-width: min(640px, calc(100vw - 24px));
   display: flex;
   flex-wrap: wrap;

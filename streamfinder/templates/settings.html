@@ -87,6 +87,13 @@
               {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
             </select>
           </div>
+          <div class="setting-row">
+            <label for="ai-via">{{ t('ai_via') }}</label>
+            <select id="ai-via" name="aiVia">
+              {% for value in ['auto', 'english', 'direct'] %}<option value="{{ value }}">{{ t('ai_via_' ~ value) }}</option>{% endfor %}
+            </select>
+          </div>
+          <p class="muted">{{ t('ai_via_help') }}</p>
         {% else %}
           <p class="muted">{{ t('ai_off_note') }}</p>
         {% endif %}

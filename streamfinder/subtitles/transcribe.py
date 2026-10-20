@@ -52,6 +52,42 @@ MAX_WINDOW = 60  # seconds of audio per request
 # to the window it starts in, so nothing is cut in half or shown twice.
 OVERLAP = 3.0
 LEAD = 0.25  # Whisper starts lines a little before the voice does
+# Languages small Whisper models write poorly but translate into English well:
+# "auto" goes audio -> English (Whisper) -> target (Google) for these.
+VIA_ENGLISH = {
+    "ja",
+    "ko",
+    "zh",
+    "yue",
+    "th",
+    "vi",
+    "ar",
+    "he",
+    "fa",
+    "hi",
+    "ur",
+    "bn",
+    "ta",
+    "te",
+    "ml",
+    "kn",
+    "mr",
+    "gu",
+    "pa",
+    "km",
+    "lo",
+    "my",
+    "si",
+    "ka",
+    "hy",
+    "am",
+    "mn",
+    "id",
+    "ms",
+    "tl",
+    "jw",
+    "su",
+}
 READING_SPEED = 0.07  # seconds per character a line stays up at most (+1.2 s)
 CACHE_SIZE = 600  # windows kept in memory (a 2 h film in 30 s windows is 240)
 
@@ -318,6 +354,7 @@ class Transcriber:
         translate_to: str = "",
         language: str = "",
         engine: str = "google",
+        via: str = "auto",
     ) -> dict:
         """Subtitle lines for [start, start + duration) of the file, cached."""
         duration = max(5.0, min(float(duration), MAX_WINDOW))
@@ -329,6 +366,7 @@ class Transcriber:
             translate_to,
             language,
             engine,
+            via,
         )
         while True:
             with self._lock:
@@ -344,7 +382,14 @@ class Transcriber:
             )  # the same window is already being made (two tabs, a retry)
         try:
             result = self._make(
-                stream_url, start, duration, audio_track, translate_to, language, engine
+                stream_url,
+                start,
+                duration,
+                audio_track,
+                translate_to,
+                language,
+                engine,
+                via,
             )
             with self._lock:
                 self._cache[key] = result
@@ -356,7 +401,7 @@ class Transcriber:
                 self._inflight.pop(key).set()
 
     def _make(
-        self, url, start, duration, audio_track, translate_to, language, engine
+        self, url, start, duration, audio_track, translate_to, language, engine, via
     ) -> dict:
         clip_start = max(0.0, start - OVERLAP)
         audio = self.extract_audio(
@@ -366,9 +411,24 @@ class Transcriber:
             len(audio) < 2000
         ):  # nothing decodable in this window (end of file, bad data)
             return {"lines": [], "language": language or None, "translated": False}
-        data = self.transcribe(audio, language)
-        detected = (data.get("language") or language or "").lower()
-        detected = _language_code(detected)
+        # Through English: Whisper translates the speech itself, Google does the rest.
+        english_first = (
+            translate_to
+            and language
+            and language not in ("en", translate_to)
+            and (via == "english" or (via == "auto" and language in VIA_ENGLISH))
+        )
+        data = None
+        if english_first:
+            try:
+                data = self.transcribe(audio, language, task="translate")
+            except TranscribeError as e:  # e.g. a model without translation
+                logger.info("Whisper translation failed, transcribing: %s", e)
+        if data is None:
+            english_first = False
+            data = self.transcribe(audio, language)
+        spoken = language or _language_code((data.get("language") or "").lower())
+        detected = "en" if english_first else spoken
         lines = clean_segments(
             data.get("segments") or [],
             clip_start,
@@ -389,10 +449,14 @@ class Transcriber:
                 translated = True
             except Exception as e:  # keep the original text rather than nothing
                 logger.info("translation failed: %s", e)
+        if english_first and not translated and translate_to == "en":
+            translated = True  # Whisper's English is the translation
         return {
             "lines": [line.to_dict() for line in lines],
-            "language": detected or None,
-            "translated": translated,
+            "language": spoken
+            or None,  # what is spoken (the player sends it back as a hint)
+            "translated": translated or english_first,
+            "via": "english" if english_first else "direct",
         }
 
     def extract_audio(
@@ -448,8 +512,21 @@ class Transcriber:
             with contextlib.suppress(OSError):
                 os.remove(path)
 
-    def transcribe(self, audio: bytes, language: str = "") -> dict:
+    def transcribe(
+        self, audio: bytes, language: str = "", task: str = "transcribe"
+    ) -> dict:
+        """Speech -> text with timestamps; task "translate" gives English text."""
         speech_model, _ = self.models()
+        endpoint = "transcriptions"
+        if task == "translate":
+            if self.provider == "local":
+                # whisper.cpp serves one path; a form field switches it to translation.
+                pass
+            else:
+                endpoint = "translations"  # OpenAI-style APIs: English only
+                speech_model = (
+                    "whisper-large-v3" if "groq" in self.api_url else speech_model
+                )
         fields = [
             ("model", speech_model),
             ("response_format", "verbose_json"),
@@ -459,9 +536,11 @@ class Transcriber:
         ]
         if language:
             fields.append(("language", language))
+        if task == "translate" and self.provider == "local":
+            fields.append(("translate", "true"))
         try:
             response = self.session.post(
-                f"{self.api_url}/audio/transcriptions",
+                f"{self.api_url}/audio/{endpoint}",
                 headers=self._headers(),
                 data=fields,
                 files={"file": ("audio.flac", audio, "audio/flac")},

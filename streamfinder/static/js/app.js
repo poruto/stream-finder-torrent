@@ -176,9 +176,44 @@
     subsMissing: "translate",
     translator: "google", // or "ai" (needs the AI subtitles key)
     aiTarget: "en", // AI subtitles: translate into this language ("" = as spoken)
+    aiVia: "auto", // "english": Whisper translates into English, Google into the target; "direct"
     volume: 1,
     muted: false,
   };
+  // Small flags for languages (emoji flags don't show on Windows). Unknown: the code.
+  const FLAG_SVG = {
+    cs: '<rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#d7141a"/><path d="M0 0 15 10 0 20Z" fill="#11457e"/>',
+    sk: '<rect width="30" height="7" fill="#fff"/><rect y="7" width="30" height="6" fill="#0b4ea2"/><rect y="13" width="30" height="7" fill="#ee1c25"/><path d="M6 4h8v7q0 4-4 6-4-2-4-6Z" fill="#ee1c25" stroke="#fff" stroke-width="1"/>',
+    en: '<rect width="30" height="20" fill="#012169"/><path d="M0 0 30 20M30 0 0 20" stroke="#fff" stroke-width="4"/><path d="M0 0 30 20M30 0 0 20" stroke="#c8102e" stroke-width="1.6"/><path d="M15 0v20M0 10h30" stroke="#fff" stroke-width="6"/><path d="M15 0v20M0 10h30" stroke="#c8102e" stroke-width="3.4"/>',
+    de: '<rect width="30" height="7" fill="#000"/><rect y="7" width="30" height="6" fill="#dd0000"/><rect y="13" width="30" height="7" fill="#ffce00"/>',
+    fr: '<rect width="10" height="20" fill="#0055a4"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#ef4135"/>',
+    it: '<rect width="10" height="20" fill="#009246"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#ce2b37"/>',
+    es: '<rect width="30" height="20" fill="#aa151b"/><rect y="5" width="30" height="10" fill="#f1bf00"/>',
+    pl: '<rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#dc143c"/>',
+    hu: '<rect width="30" height="7" fill="#ce2939"/><rect y="7" width="30" height="6" fill="#fff"/><rect y="13" width="30" height="7" fill="#477050"/>',
+    ru: '<rect width="30" height="7" fill="#fff"/><rect y="7" width="30" height="6" fill="#0039a6"/><rect y="13" width="30" height="7" fill="#d52b1e"/>',
+    uk: '<rect width="30" height="10" fill="#0057b7"/><rect y="10" width="30" height="10" fill="#ffd700"/>',
+    nl: '<rect width="30" height="7" fill="#ae1c28"/><rect y="7" width="30" height="6" fill="#fff"/><rect y="13" width="30" height="7" fill="#21468b"/>',
+    pt: '<rect width="12" height="20" fill="#006600"/><rect x="12" width="18" height="20" fill="#ff0000"/><circle cx="12" cy="10" r="4" fill="#ffcc00"/>',
+    ja: '<rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#bc002d"/>',
+    ko: '<rect width="30" height="20" fill="#fff"/><path d="M9 10a6 6 0 0 1 12 0Z" fill="#cd2e3a"/><path d="M9 10a6 6 0 0 0 12 0Z" fill="#0047a0"/>',
+    zh: '<rect width="30" height="20" fill="#de2910"/><path d="m6 3 1.2 3.6H11L8 8.8l1.1 3.6L6 10.2l-3.1 2.2L4 8.8 1 6.6h3.8Z" fill="#ffde00"/>',
+    sv: '<rect width="30" height="20" fill="#006aa7"/><path d="M11 0v20M0 10h30" stroke="#fecc00" stroke-width="4"/>',
+    da: '<rect width="30" height="20" fill="#c8102e"/><path d="M11 0v20M0 10h30" stroke="#fff" stroke-width="4"/>',
+    fi: '<rect width="30" height="20" fill="#fff"/><path d="M11 0v20M0 10h30" stroke="#002f6c" stroke-width="5"/>',
+    no: '<rect width="30" height="20" fill="#ba0c2f"/><path d="M11 0v20M0 10h30" stroke="#fff" stroke-width="5"/><path d="M11 0v20M0 10h30" stroke="#00205b" stroke-width="2.4"/>',
+    tr: '<rect width="30" height="20" fill="#e30a17"/><circle cx="12" cy="10" r="5" fill="#fff"/><circle cx="13.3" cy="10" r="4" fill="#e30a17"/>',
+    hr: '<rect width="30" height="7" fill="#ff0000"/><rect y="7" width="30" height="6" fill="#fff"/><rect y="13" width="30" height="7" fill="#171796"/>',
+    ro: '<rect width="10" height="20" fill="#002b7f"/><rect x="10" width="10" height="20" fill="#fcd116"/><rect x="20" width="10" height="20" fill="#ce1126"/>',
+  };
+  SF.flag = (code) => {
+    const svg = FLAG_SVG[code];
+    if (!svg) return SF.el("span", { className: "flag flag-code", "aria-hidden": "true" }, [String(code || "?").toUpperCase()]);
+    const holder = SF.el("span", { className: "flag", "aria-hidden": "true" });
+    holder.innerHTML = `<svg viewBox="0 0 30 20" preserveAspectRatio="none">${svg}</svg>`;
+    return holder;
+  };
+
   SF.settings = {
     get: () => ({ ...DEFAULT_SETTINGS, ...settingsStore.read() }),
     set: (changes) => settingsStore.write({ ...SF.settings.get(), ...changes }),
@@ -215,6 +250,7 @@
     settingsForm.subsMissing.value = current.subsMissing;
     settingsForm.translator.value = current.translator;
     if (settingsForm.aiTarget) settingsForm.aiTarget.value = current.aiTarget;
+    if (settingsForm.aiVia) settingsForm.aiVia.value = current.aiVia;
     const saved = document.getElementById("settings-saved");
     settingsForm.addEventListener("change", () => {
       SF.settings.set({
@@ -229,6 +265,7 @@
         subsMissing: settingsForm.subsMissing.value || "translate",
         translator: settingsForm.translator.value || "google",
         ...(settingsForm.aiTarget ? { aiTarget: settingsForm.aiTarget.value } : {}),
+        ...(settingsForm.aiVia ? { aiVia: settingsForm.aiVia.value } : {}),
       });
       saved.textContent = t("saved");
     });

@@ -152,7 +152,8 @@
     if (!v.languages.length) return null;
     const langs = v.languages.join("/");
     const kind = v.czech === "subs" ? "subs" : "dub";
-    return el("span", { className: `lang-tag lang-${kind}` }, [t(`lang_${kind}`, { l: langs })]);
+    const code = v.languages[0] === "SK" ? "sk" : "cs";
+    return el("span", { className: `lang-tag lang-${kind}` }, [SF.flag(code), t(`lang_${kind}`, { l: langs })]);
   }
 
   // ============================================================= hero
@@ -1595,145 +1596,102 @@
   // "Interstellar.2014.1080p.BluRay.x264-YIFY" -> "Interstellar 2014 1080p BluRay x264 YIFY"
   const readableRelease = (name) => (name || "").replace(/\.(srt|sub|ass|vtt)$/i, "").replace(/[._-]+/g, " ").trim();
 
-  // Which tab of the subtitles menu is open: a language code, "translate" or "ai".
+  // Which language list is open under "All subtitles".
   let subsTab = null;
 
   function renderSubsMenu() {
-    const option = (checked, title, detail, onClick, extra = "") => {
+    // One row: [check] [flag] title / detail. `badge`: "AI" etc. instead of a flag.
+    const option = (checked, code, title, detail, onClick, badge = "") => {
       const button = el(
         "button",
-        {
-          type: "button",
-          className: `subs-option ${extra}`.trim(),
-          role: "menuitemradio",
-          "aria-checked": String(checked),
-          title: detail || null,
-        },
+        { type: "button", className: "subs-option", role: "menuitemradio", "aria-checked": String(checked), title: detail || null },
         [
           icon("check"),
-          el("span", {}, [
-            el("strong", {}, [title]),
-            detail ? el("small", {}, [detail]) : null,
-          ]),
+          badge ? el("span", { className: "flag flag-badge", "aria-hidden": "true" }, [badge]) : code ? SF.flag(code) : el("span", { className: "flag flag-none" }),
+          el("span", { className: "subs-text" }, [el("strong", {}, [title]), detail ? el("small", {}, [detail]) : null]),
         ],
       );
       button.addEventListener("click", onClick);
       return button;
     };
+    const heading = (text) => el("div", { className: "subs-group" }, [text]);
     const settings = SF.settings.get();
     const active = state.activeSub;
+    const mine = settings.primary;
     const byLanguage = new Map();
     for (const c of state.subs) {
       if (!byLanguage.has(c.language)) byLanguage.set(c.language, []);
       byLanguage.get(c.language).push(c);
     }
-    // My language first, then the backup one, then the rest.
-    const rank = (code) => (code === settings.primary ? 0 : code === settings.fallback ? 1 : 2);
+    const rank = (code) => (code === mine ? 0 : code === settings.fallback ? 1 : 2);
     const languages = [...byLanguage.keys()].sort((x, y) => rank(x) - rank(y));
-    const foreign = languages.filter((code) => code !== settings.primary);
-    const aiTarget = settings.aiTarget ?? "en";
+    const sourceText = (c) => (c.note ? t(`note_${c.note}`) : t(`subs_source_${c.source === "torrent" ? "torrent" : "online"}`));
+    const pick = (c) => () => {
+      SF.settings.set({ auto: true });
+      applySubtitle(c);
+    };
 
-    // Quick choices on top: off, and the AI subtitles in my target language.
-    const options = [
-      option(!active, t("subs_off_option"), "", () => {
-        SF.settings.set({ auto: false });
-        applySubtitle(null);
-      }),
-    ];
+    // -- one click: what most people want
+    const options = [option(!active, "", t("subs_off_option"), "", () => {
+      SF.settings.set({ auto: false });
+      applySubtitle(null);
+    })];
+    const recommended = [];
+    const best = byLanguage.get(mine)?.[0];
+    if (best) {
+      recommended.push(option(active?.id === best.id, mine, languageName(mine), `${t("subs_best_match")} · ${sourceText(best)}`, pick(best)));
+    } else {
+      // Nothing in my language: the best other one, machine-translated.
+      const from = byLanguage.get(settings.fallback)?.[0] || state.subs[0];
+      if (from) {
+        const tr = translatedCandidate(from, mine);
+        recommended.push(option(active?.id === tr.id, mine, t("subs_translated_from", { lang: languageName(mine), from: languageName(from.language) }), t(`translator_${translatorEngine()}`), pick(tr)));
+      }
+    }
     if (state.aiAvailable) {
-      const ai = aiCandidate(aiTarget);
-      options.push(
-        option(
-          active?.id === ai.id,
-          aiTarget ? t("subs_ai_translated", { lang: languageName(aiTarget) }) : t("subs_ai_original"),
-          t("subs_ai_help"),
-          () => applySubtitle(ai),
-          "subs-ai",
-        ),
-      );
+      const target = settings.aiTarget ?? "en";
+      const ai = aiCandidate(target);
+      recommended.push(option(active?.id === ai.id, target, target ? t("subs_ai_into", { lang: languageName(target) }) : t("subs_ai_original"), t("subs_ai_help"), () => applySubtitle(ai), "AI"));
+      if (target) {
+        const spoken = aiCandidate("");
+        recommended.push(option(active?.id === spoken.id, "", t("subs_ai_original"), t("subs_ai_original_help"), () => applySubtitle(spoken), "AI"));
+      }
     }
+    if (recommended.length) options.push(heading(t("subs_recommended")), ...recommended);
 
-    // Tabs: one per language with subtitles, then "translate" and "AI".
-    const tabs = [
-      ...languages.map((code) => [code, `${languageName(code)} (${byLanguage.get(code).length})`]),
-      ...(foreign.length ? [["translate", t("subs_tab_translate")]] : []),
-      ...(state.aiAvailable ? [["ai", t("subs_tab_ai")]] : []),
-    ];
-    const tabOf = (sub) =>
-      !sub ? null : sub.source === "ai" ? "ai" : sub.translatedFrom ? "translate" : sub.language;
-    if (!tabs.some(([key]) => key === subsTab)) {
-      subsTab = tabOf(active) || (languages.includes(settings.primary) ? settings.primary : tabs[0]?.[0] || null);
-    }
-    if (tabs.length) {
+    // -- every subtitle, one language at a time
+    if (languages.length) {
+      options.push(heading(t("subs_all")));
+      if (!languages.includes(subsTab)) subsTab = active && byLanguage.has(active.language) && !active.translatedFrom ? active.language : languages[0];
       const bar = el("div", { className: "subs-tabs", role: "tablist" });
-      for (const [key, label] of tabs) {
-        const tab = el(
-          "button",
-          { type: "button", className: "chip", role: "tab", "aria-selected": String(key === subsTab) },
-          [label],
-        );
+      for (const code of languages) {
+        const tab = el("button", { type: "button", className: "chip lang-chip", role: "tab", "aria-selected": String(code === subsTab), title: languageName(code) }, [
+          SF.flag(code),
+          el("span", {}, [languageName(code)]),
+          el("small", {}, [String(byLanguage.get(code).length)]),
+        ]);
         tab.addEventListener("click", () => {
-          subsTab = key;
+          subsTab = code;
           renderSubsMenu();
         });
         bar.append(tab);
       }
       options.push(bar);
-    }
-
-    const list = [];
-    if (subsTab === "translate") {
-      for (const code of foreign) {
-        const candidate = translatedCandidate(byLanguage.get(code)[0], settings.primary);
-        list.push(
-          option(
-            active?.id === candidate.id,
-            t("subs_translate_into", { from: languageName(code), to: languageName(settings.primary) }),
-            t(`translator_${translatorEngine()}`),
-            () => applySubtitle(candidate),
-          ),
-        );
-      }
-    } else if (subsTab === "ai") {
-      for (const translate of [aiTarget, ""].filter((v, i, all) => all.indexOf(v) === i)) {
-        const candidate = aiCandidate(translate);
-        list.push(
-          option(
-            active?.id === candidate.id,
-            translate ? t("subs_ai_translated", { lang: languageName(translate) }) : t("subs_ai_original"),
-            t("subs_ai_help"),
-            () => applySubtitle(candidate),
-          ),
-        );
-      }
-    } else if (subsTab && byLanguage.has(subsTab)) {
       const subs = byLanguage.get(subsTab);
-      const rows = subs.map((c, i) =>
-        option(
-          active?.id === c.id,
-          readableRelease(c.release) || t("subs_version_n", { n: i + 1 }),
-          c.note ? t(`note_${c.note}`) : t(`subs_source_${c.source === "torrent" ? "torrent" : "online"}`),
-          () => {
-            SF.settings.set({ auto: true, primary: c.language });
-            applySubtitle(c);
-          },
-        ),
-      );
-      const current = subs.findIndex((c) => c.id === active?.id);
-      const shown = Math.max(4, current + 1);
-      list.push(...rows.slice(0, shown));
-      if (rows.length > shown) {
-        list.push(
-          el("details", { className: "subs-more" }, [
-            el("summary", {}, [t("subs_more", { n: rows.length - shown })]),
-            ...rows.slice(shown),
-          ]),
-        );
+      const rows = subs.map((c, i) => option(active?.id === c.id, "", readableRelease(c.release) || t("subs_version_n", { n: i + 1 }), sourceText(c), pick(c)));
+      if (subsTab !== mine) {
+        // Right here: this language translated into mine, one click.
+        const tr = translatedCandidate(subs[0], mine);
+        rows.unshift(option(active?.id === tr.id, mine, t("subs_translate_into", { from: languageName(subsTab), to: languageName(mine) }), t(`translator_${translatorEngine()}`), pick(tr)));
       }
+      const current = rows.findIndex((row) => row.getAttribute("aria-checked") === "true");
+      const shown = Math.max(5, current + 1);
+      const list = el("div", { className: "subs-list" }, rows.slice(0, shown));
+      if (rows.length > shown) list.append(el("details", { className: "subs-more" }, [el("summary", {}, [t("subs_more", { n: rows.length - shown })]), ...rows.slice(shown)]));
+      options.push(list);
+    } else if (!state.aiAvailable) {
+      options.push(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
     }
-    if (!state.subs.length && !state.aiAvailable)
-      list.push(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
-    options.push(el("div", { className: "subs-list" }, list));
     $("subs-options").replaceChildren(...options);
     $("subs-autosync").disabled = !active || active.source === "ai";
   }
@@ -1880,6 +1838,8 @@
       audio: String(current.audioTrack || 0),
       translate: ai.candidate.translate || "",
       engine: translatorEngine(),
+      via: SF.settings.get().aiVia || "auto",
+      language: ai.spoken || "",
     });
     let retryIn = 0;
     try {
@@ -1903,6 +1863,7 @@
       }
       ai.failures = 0;
       ai.windows.set(n, "done");
+      ai.spoken ||= data.language || ""; // later windows: known language, English route if useful
       const cues = ai.track.track;
       for (const line of data.lines || []) {
         const cue = new VTTCue(line.start, line.end, line.text);
