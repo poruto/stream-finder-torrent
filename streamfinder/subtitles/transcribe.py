@@ -23,17 +23,19 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
 import requests
+from requests.adapters import HTTPAdapter
 
+from ..transcode import NO_WINDOW, RW_TIMEOUT
 from .formats import LANGUAGE_NAMES
 
 logger = logging.getLogger(__name__)
 
 GROQ_URL = "https://api.groq.com/openai/v1"
-LOCAL_URL = "http://127.0.0.1:8178/v1"  # whisper.cpp server from install-whisper.sh
 LOCAL_URL = "http://127.0.0.1:8178/v1"  # whisper.cpp server from install-whisper.sh
 OPENAI_URL = "https://api.openai.com/v1"
 # Preferred models, best first; the first one the account offers is used.
@@ -54,6 +56,7 @@ OVERLAP = 3.0
 LEAD = 0.25  # Whisper starts lines a little before the voice does
 READING_SPEED = 0.07  # seconds per character a line stays up at most (+1.2 s)
 CACHE_SIZE = 600  # windows kept in memory (a 2 h film in 30 s windows is 240)
+CHAT_RETRY = 300  # seconds before a failed chat model lookup is tried again
 
 
 class TranscribeError(Exception):
@@ -214,6 +217,8 @@ class Transcriber:
     ):
         self.transcoder = transcoder
         self.session = requests.Session()
+        self.session.mount("http://", HTTPAdapter(pool_maxsize=32))
+        self.session.mount("https://", HTTPAdapter(pool_maxsize=32))
         self._cache: OrderedDict[tuple, dict] = OrderedDict()
         self._lock = threading.Lock()
         self._inflight: dict[tuple, threading.Event] = {}
@@ -247,6 +252,7 @@ class Transcriber:
         self.chat_url = api_url_for(api_key) if api_key else ""
         self._models = None
         self._chat_model: str | None | bool = False  # False = not looked up yet
+        self._chat_retry_at = 0.0  # after a failed lookup, not before this (monotonic)
 
     @property
     def available(self) -> bool:
@@ -322,6 +328,8 @@ class Transcriber:
     def chat_model(self) -> str | None:
         """Chat model of the key's account, for AI translation."""
         if self._chat_model is False:
+            if time.monotonic() < self._chat_retry_at:
+                return None  # failed a moment ago: don't wait for another timeout
             self._chat_model = None
             if self.chat_url:
                 try:
@@ -331,7 +339,8 @@ class Transcriber:
                     )
                 except (requests.RequestException, ValueError, TranscribeError) as e:
                     logger.info("chat model lookup failed: %s", e)
-                    self._chat_model = False  # try again next time
+                    self._chat_model = False  # try again in a few minutes
+                    self._chat_retry_at = time.monotonic() + CHAT_RETRY
                     return None
         return self._chat_model
 
@@ -373,7 +382,7 @@ class Transcriber:
                 120
             )  # the same window is already being made (two tabs, a retry)
         try:
-            result = self._make(
+            result, complete = self._make(
                 stream_url,
                 start,
                 duration,
@@ -383,10 +392,11 @@ class Transcriber:
                 engine,
                 via,
             )
-            with self._lock:
-                self._cache[key] = result
-                while len(self._cache) > CACHE_SIZE:
-                    self._cache.popitem(last=False)
+            if complete:  # a failed translation is tried again next time
+                with self._lock:
+                    self._cache[key] = result
+                    while len(self._cache) > CACHE_SIZE:
+                        self._cache.popitem(last=False)
             return result
         finally:
             with self._lock:
@@ -394,15 +404,19 @@ class Transcriber:
 
     def _make(
         self, url, start, duration, audio_track, translate_to, language, engine, via
-    ) -> dict:
+    ) -> tuple[dict, bool]:
+        """(the window's subtitles, whether they are final and may be cached)."""
         clip_start = max(0.0, start - OVERLAP)
         audio = self.extract_audio(
             url, clip_start, duration + (start - clip_start) + OVERLAP, audio_track
         )
-        if (
-            len(audio) < 2000
-        ):  # nothing decodable in this window (end of file, bad data)
-            return {"lines": [], "language": language or None, "translated": False}
+        # Nothing decodable in this window (end of file, no audio there).
+        if len(audio) < 2000:
+            return {
+                "lines": [],
+                "language": language or None,
+                "translated": False,
+            }, True
         # Through English: Whisper translates the speech itself, Google does the rest.
         # Route: Whisper turns the speech into English itself ("translate" task),
         # Google then translates the English into the target language. Straight
@@ -440,7 +454,9 @@ class Transcriber:
         lines = [line for line in lines if start <= line.start < start + duration]
         lines = merge_sentences(lines)
         translated = False
+        complete = True
         if translate_to and lines and detected != translate_to:
+            complete = False  # until the translation has worked
             try:
                 texts = [line.text for line in lines]
                 if self.translator is not None:
@@ -449,7 +465,7 @@ class Transcriber:
                     texts = self.translate(texts, translate_to)
                 for line, text in zip(lines, texts, strict=True):
                     line.text = text
-                translated = True
+                translated = complete = True
             except Exception as e:  # keep the original text rather than nothing
                 logger.info("translation failed: %s", e)
         if english_first and not translated and translate_to == "en":
@@ -460,7 +476,7 @@ class Transcriber:
             or None,  # what is spoken (the player sends it back as a hint)
             "translated": translated or english_first,
             "via": "english" if english_first else "direct",
-        }
+        }, complete
 
     def extract_audio(
         self, url: str, start: float, duration: float, audio_track: int = 0
@@ -472,10 +488,11 @@ class Transcriber:
         """
         if not self._extract_slots.acquire(timeout=60):
             raise TranscribeError("too many AI subtitle requests", 503, retry_after=5)
-        fd, path = tempfile.mkstemp(suffix=".flac", prefix="sf-audio-")
-        os.close(fd)
+        path = None
         try:
-            subprocess.run(
+            fd, path = tempfile.mkstemp(suffix=".flac", prefix="sf-audio-")
+            os.close(fd)
+            result = subprocess.run(
                 [
                     self.transcoder.ffmpeg,
                     "-hide_banner",
@@ -487,6 +504,7 @@ class Transcriber:
                     f"{max(0.0, start):.3f}",
                     "-t",
                     f"{duration:.3f}",
+                    *RW_TIMEOUT,
                     "-i",
                     url,
                     "-map",
@@ -503,17 +521,27 @@ class Transcriber:
                 ],
                 capture_output=True,
                 timeout=90,
+                check=False,
+                creationflags=NO_WINDOW,
             )
             with open(path, "rb") as f:
-                return f.read()
+                audio = f.read()
         except subprocess.TimeoutExpired:
             raise TranscribeError(
                 "the torrent is too slow to read this part yet", 504, retry_after=10
             ) from None
         finally:
             self._extract_slots.release()
-            with contextlib.suppress(OSError):
-                os.remove(path)
+            if path:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
+        if result.returncode and len(audio) < 2000:
+            # TorrServer hiccup, stalled read...: not an empty window, so ask again later.
+            error = result.stderr.decode("utf-8", "replace").strip()[-200:]
+            raise TranscribeError(
+                f"could not read this part of the file: {error}", 504, retry_after=5
+            )
+        return audio
 
     def transcribe(
         self, audio: bytes, language: str = "", task: str = "transcribe"

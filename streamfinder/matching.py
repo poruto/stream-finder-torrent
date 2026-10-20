@@ -5,6 +5,7 @@ is it for in-browser streaming?) and subtitle search (was this subtitle made
 for the same release, so it will be in sync?).
 """
 
+import functools
 import math
 import re
 import unicodedata
@@ -412,34 +413,36 @@ def parse_release(name: str) -> ReleaseInfo:
 
 def title_similarity(candidate: str, expected_titles: Iterable[str]) -> float:
     """Return 0..1 similarity between a parsed release title and any expected title."""
-    candidate_norm = normalize_title(candidate)
-    if not candidate_norm:
+    cand_variants = _title_variants(candidate)
+    if not cand_variants:
         return 0.0
     best = 0.0
     for expected in expected_titles:
-        expected_norm = normalize_title(expected)
-        if not expected_norm:
-            continue
-        variants = {
-            expected_norm,
-            re.sub(r"^(the|a|an) ", "", expected_norm),
-            expected_norm.replace(" and ", " "),
-        }
-        cand_variants = {
-            candidate_norm,
-            re.sub(r"^(the|a|an) ", "", candidate_norm),
-            candidate_norm.replace(" and ", " "),
-        }
-        for exp in variants:
+        for exp in _title_variants(expected):
             for cand in cand_variants:
                 if exp == cand:
                     return 1.0
-                ratio = SequenceMatcher(None, exp, cand).ratio()
                 # "Title" vs "Title US" / "Title Show" style suffixes
                 if cand.startswith(exp + " ") and len(cand) - len(exp) <= 4:
-                    ratio = max(ratio, 0.9)
-                best = max(best, ratio)
+                    best = max(best, 0.9)
+                matcher = SequenceMatcher(None, exp, cand)
+                # ratio() is slow; its cheap upper bounds skip pairs that can't beat `best`.
+                if matcher.real_quick_ratio() > best and matcher.quick_ratio() > best:
+                    best = max(best, matcher.ratio())
     return best
+
+
+@functools.lru_cache(maxsize=4096)
+def _title_variants(title: str | None) -> tuple[str, ...]:
+    """A title normalised, without a leading article and without "and".
+
+    Cached: one search compares hundreds of release names with the same few titles.
+    """
+    norm = normalize_title(title)
+    if not norm:
+        return ()
+    variants = (norm, re.sub(r"^(the|a|an) ", "", norm), norm.replace(" and ", " "))
+    return tuple(dict.fromkeys(variants))
 
 
 def parse_size(value) -> int:

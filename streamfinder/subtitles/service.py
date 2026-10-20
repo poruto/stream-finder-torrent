@@ -12,11 +12,13 @@ Candidates are ranked by hash match, release-name similarity (group / source /
 service / edition), popularity and quality flags.
 """
 
+import contextlib
 import hashlib
 import logging
 import math
 import os
 import re
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -25,6 +27,7 @@ from typing import Any
 import requests
 
 from .. import config
+from ..caching import LRU, KeyedLocks
 from ..matching import ReleaseInfo, parse_release, release_match_score
 from ..torrserver import (
     TorrentFile,
@@ -48,6 +51,7 @@ from .opensubtitles_org import OpenSubtitlesOrgClient
 logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"os-\d+|org-\d+|tor-[a-f0-9]{40}-\d+")
+META_SIZE = 3000  # candidates remembered (a search returns up to a few hundred)
 
 
 @dataclass
@@ -129,9 +133,10 @@ class SubtitleService:
         self.org = OpenSubtitlesOrgClient()
         self.cache_dir = cache_dir or config.SUBTITLE_CACHE_DIR
         os.makedirs(self.cache_dir, exist_ok=True)
-        self._meta: dict[
-            str, SubtitleCandidate
-        ] = {}  # candidate id -> metadata needed to fetch it
+        # candidate id -> metadata needed to fetch it (the most recent searches)
+        self._meta: LRU = LRU(META_SIZE)
+        # One download or translation per cache file at a time.
+        self._writing = KeyedLocks()
         self._hashes: dict[str, str] = {}  # '<hash>:<index>' -> moviehash
         self._pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="subtitles")
         # OpenSubtitles.org puts downloads behind a bot check at times; then only
@@ -412,18 +417,43 @@ class SubtitleService:
             hashlib.sha1(f"{candidate_id}|{target}|{engine}".encode()).hexdigest()
             + ".vtt",
         )
-        if os.path.exists(cache_path):
-            with open(cache_path, encoding="utf-8") as f:
-                return f.read()
-        cues = parse_cues(self.get_vtt(candidate_id))
-        texts = translator.translate([text for _, _, text in cues], target, engine)
-        out = ["WEBVTT", ""]
-        for (start, end, _), text in zip(cues, texts, strict=True):
-            out += [f"{_vtt_time(start)} --> {_vtt_time(end)}", text, ""]
-        vtt = "\n".join(out)
-        with open(cache_path, "w", encoding="utf-8") as f:
-            f.write(vtt)
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        original = self.get_vtt(candidate_id)  # before the lock: it takes its own
+        # A retry of the same translation waits for the running one.
+        with self._writing.hold(cache_path):
+            cached = self._read_cache(cache_path)
+            if cached is not None:
+                return cached
+            cues = parse_cues(original)
+            texts = translator.translate([text for _, _, text in cues], target, engine)
+            out = ["WEBVTT", ""]
+            for (start, end, _), text in zip(cues, texts, strict=True):
+                out += [f"{_vtt_time(start)} --> {_vtt_time(end)}", text, ""]
+            vtt = "\n".join(out)
+            self._write_cache(cache_path, vtt)
         return vtt
+
+    @staticmethod
+    def _read_cache(path: str) -> str | None:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
+    def _write_cache(self, path: str, text: str) -> None:
+        """Write via a unique temporary file, so nobody ever reads half a subtitle."""
+        fd, tmp_path = tempfile.mkstemp(dir=self.cache_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp_path, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp_path)
+            raise
 
     def _download_org(self, id_subtitle: int, meta: SubtitleCandidate | None) -> bytes:
         """OpenSubtitles.org first (no quota); the same file via the .com API if refused."""
@@ -454,10 +484,19 @@ class SubtitleService:
         cache_path = os.path.join(
             self.cache_dir, hashlib.sha1(candidate_id.encode()).hexdigest() + ".vtt"
         )
-        if os.path.exists(cache_path):
-            with open(cache_path, encoding="utf-8") as f:
-                return f.read()
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        # The player and subtitle sync often ask for the same subtitle at once: download it once.
+        with self._writing.hold(cache_path):
+            cached = self._read_cache(cache_path)
+            if cached is not None:
+                return cached
+            vtt = self._download_vtt(candidate_id)
+            self._write_cache(cache_path, vtt)
+        return vtt
 
+    def _download_vtt(self, candidate_id: str) -> str:
         meta = self._meta.get(candidate_id)
         language = meta.language if meta else None
         kind, _, rest = candidate_id.partition("-")
@@ -469,8 +508,7 @@ class SubtitleService:
             raw = self.api.download(int(rest))
         else:
             info_hash, _, index = rest.partition("-")
-            files = self.torrserver.files(info_hash, wait=10)
-            file = next((f for f in files if f.index == int(index)), None)
+            file = self.torrserver.file(info_hash, int(index), wait=10)
             if file is None or not file.is_subtitle:
                 raise ValueError("Soubor s titulky v torrentu nenalezen")
             raw = self.torrserver.read_file(info_hash, file)
@@ -479,8 +517,4 @@ class SubtitleService:
         vtt = to_webvtt(decode_subtitle(raw, language), fps=meta.fps if meta else None)
         if "-->" not in vtt:
             raise ValueError("Titulky se nepodařilo převést (neznámý formát)")
-        tmp_path = cache_path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(vtt)
-        os.replace(tmp_path, cache_path)
         return vtt

@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests
-from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
+from flask import Blueprint, Response, abort, jsonify, request
 
 from . import auth, config
 from .auth import admin_required
@@ -28,6 +28,7 @@ from .torrserver import (
     select_video_file,
     video_files,
 )
+from .transcode import TranscoderBusy
 from .views import (
     browse_filters,
     browse_page,
@@ -60,6 +61,13 @@ def _int(value) -> int | None:
         return int(value) if value not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+def _float(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _media_type(value) -> str:
@@ -245,11 +253,10 @@ def _torrent_file(info_hash: str, index: int):
     if not _HASH_RE.fullmatch(info_hash):
         abort(404)
     try:
-        files = services().torrserver.files(info_hash, wait=10)
+        file = services().torrserver.file(info_hash, index, wait=10)
     except TorrServerError:
         abort(502)
-    file = next((f for f in files if f.index == index and f.is_video), None)
-    if file is None:
+    if file is None or not file.is_video:
         abort(404)
     return file
 
@@ -304,15 +311,18 @@ def transcode(info_hash: str, index: int):
         video_codec = svc.transcoder.probe(url).video_codec
     except Exception:
         video_codec = None
-    chunks = svc.transcoder.stream(
-        url,
-        start,
-        track,
-        copy_audio=request.args.get("copy") == "1",
-        video_codec=video_codec,
-    )
+    try:
+        chunks = svc.transcoder.stream(
+            url,
+            start,
+            track,
+            copy_audio=request.args.get("copy") == "1",
+            video_codec=video_codec,
+        )
+    except TranscoderBusy as e:
+        return jsonify(success=False, error=str(e)), 503
     return Response(
-        stream_with_context(chunks),
+        chunks,  # needs no request context; its close() always reaches ffmpeg
         mimetype="video/mp4",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
@@ -445,7 +455,7 @@ def sync_subtitles():
     info_hash = (body.get("hash") or "").lower()
     file = _torrent_file(info_hash, _int(body.get("file_index")) or 0)
     url = svc.torrserver.stream_url(info_hash, file)
-    position = max(0.0, float(body.get("position") or 0))
+    position = max(0.0, _float(body.get("position")))
     audio_track = max(0, _int(body.get("audio")) or 0)
     candidate = str(body.get("subtitle") or "")
     try:

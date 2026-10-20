@@ -79,6 +79,24 @@ def _overlap(
     return total
 
 
+def in_reach(
+    cues: list[tuple[float, float]], window: tuple[float, float]
+) -> list[tuple[float, float]]:
+    """Cues that some shift and scale `align` tries can move into the window.
+
+    The others never count, and dropping the rest of the film up front makes
+    the ~700 tries fast on a Raspberry Pi.
+    """
+    lo, hi = window
+    reach = MAX_SHIFT + 1  # the fine search goes a little past MAX_SHIFT
+    return [
+        (s, e)
+        for s, e in cues
+        if max(e * k for k in SCALES) + reach > lo
+        and min(s * k for k in SCALES) - reach < hi
+    ]
+
+
 def align(
     cues: list[tuple[float, float]],
     speech: list[tuple[float, float]],
@@ -87,7 +105,7 @@ def align(
     """Best (offset, scale) for `cues` (seconds) against `speech` detected inside `window`."""
     lo, hi = window
     speech = sorted(speech)
-    cues = sorted(cues)
+    cues = sorted(in_reach(cues, window))
     speech_total = sum(e - s for s, e in speech)
 
     def score(scale: float, offset: float) -> float:

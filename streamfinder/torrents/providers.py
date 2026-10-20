@@ -9,6 +9,7 @@
 
 import contextlib
 import logging
+import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ class Provider:
 
     def __init__(self, mirrors: list[str], timeout: int):
         self.mirrors = [m.rstrip("/") for m in mirrors]
+        self._mirrors_lock = threading.Lock()
         self.timeout = timeout
         self.session = requests.Session()
         retry = Retry(
@@ -76,9 +78,10 @@ class Provider:
                 last_error = e
                 logger.debug("%s mirror %s failed: %s", self.name, mirror, e)
                 continue
-            if mirror != self.mirrors[0]:
-                self.mirrors.remove(mirror)
-                self.mirrors.insert(0, mirror)
+            with self._mirrors_lock:  # parallel queries may promote the same mirror
+                if mirror in self.mirrors and mirror != self.mirrors[0]:
+                    self.mirrors.remove(mirror)
+                    self.mirrors.insert(0, mirror)
             return data
         raise ConnectionError(f"{self.name}: no mirror answered ({last_error})")
 

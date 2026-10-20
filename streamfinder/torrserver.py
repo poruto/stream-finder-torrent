@@ -15,10 +15,14 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from requests.adapters import HTTPAdapter
 
+from .caching import LRU
 from .matching import is_subtitle_path, is_video_path, parse_release
 
 logger = logging.getLogger(__name__)
+
+FILES_TTL = 600  # seconds a torrent's file list is reused (it never changes)
 
 _BTIH_RE = re.compile(r"urn:btih:([a-zA-Z0-9]{32,40})", re.IGNORECASE)
 _HEX40_RE = re.compile(r"^[a-fA-F0-9]{40}$")
@@ -148,6 +152,10 @@ class TorrServerClient:
         self.stream_path = "/" + stream_path.strip("/")
         self.timeout = timeout
         self.session = requests.Session()
+        # Request threads, subtitle workers and range reads share it: more than the default 10.
+        self.session.mount("http://", HTTPAdapter(pool_maxsize=32))
+        self.session.mount("https://", HTTPAdapter(pool_maxsize=32))
+        self._files: LRU = LRU(64)  # info hash -> (valid until, file list)
 
     def _post(self, payload: dict[str, Any], timeout: int | None = None) -> Any:
         try:
@@ -220,13 +228,26 @@ class TorrServerClient:
                 status = self.get(info_hash) or {}
             stats = status.get("file_stats") or []
             if stats or time.monotonic() >= deadline:
-                return [
+                files = [
                     TorrentFile(
                         int(f["id"]), f.get("path", ""), int(f.get("length", 0))
                     )
                     for f in stats
                 ]
+                if files:
+                    self._files[info_hash] = (time.monotonic() + FILES_TTL, files)
+                return files
             time.sleep(1)
+
+    def file(self, info_hash: str, index: int, wait: float = 0) -> TorrentFile | None:
+        """One file of a torrent; the player asks often (probe, seek, AI subtitles), so the
+        file list is reused for a few minutes and only fetched again for an unknown index."""
+        cached = self._files.get(info_hash)
+        if cached and cached[0] > time.monotonic():
+            found = next((f for f in cached[1] if f.index == index), None)
+            if found is not None:
+                return found
+        return next((f for f in self.files(info_hash, wait) if f.index == index), None)
 
     def stream_url(
         self, info_hash: str, file: TorrentFile, base_url: str | None = None
@@ -255,12 +276,13 @@ class TorrServerClient:
         )
         try:
             response.raise_for_status()
-            data = b""
+            # bytearray: += on bytes would copy everything read so far each time.
+            data = bytearray()
             for chunk in response.iter_content(65536):
                 data += chunk
                 if len(data) >= end - start + 1:
                     break
-            return data[: end - start + 1]
+            return bytes(data[: end - start + 1])
         finally:
             response.close()
 

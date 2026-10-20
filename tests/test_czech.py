@@ -116,6 +116,6 @@ def test_sktorrent_parses_results_and_skips_other_categories():
 def test_private_trackers_only_for_sktorrent_results():
     provider = SkTorrentProvider("user", "secret", 5)
     provider._announce = ["https://sktorrent.eu/torrent/announce.php?pid=x"]
-    provider._seen.add("a" * 40)
+    provider._seen["a" * 40] = None
     assert provider.extra_trackers("A" * 40)[0].endswith("pid=x")
     assert provider.extra_trackers("b" * 40) == []

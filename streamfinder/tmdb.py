@@ -14,6 +14,8 @@ from . import config
 logger = logging.getLogger(__name__)
 
 IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
+# Titles every detail page needs besides the visitor's language: key -> TMDB locale.
+TITLE_LANGUAGES = {"english_title": "en-US", "czech_title": "cs-CZ"}
 
 
 class TMDBError(Exception):
@@ -30,6 +32,7 @@ class TMDBClient:
         self.session = requests.Session()
         self._cache: dict[tuple, tuple] = {}
         self._lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tmdb")
 
     def _get(
         self, path: str, ttl: int = 3600, language: str | None = None, **params
@@ -152,23 +155,29 @@ class TMDBClient:
 
         Adds `english_title` (torrents are named in English) and `imdb_id`.
         """
+        path = f"/{media_type}/{tmdb_id}"
+        locale = _request_locale(self.language)
+        # English and Czech titles (Czech releases are named after the Czech title) are
+        # fetched alongside; the one in the visitor's own language is in `data` already.
+        others = {
+            name: self._pool.submit(self._get, path, 3600, language)
+            for name, language in TITLE_LANGUAGES.items()
+            if language != locale
+        }
         data = dict(
             self._get(
-                f"/{media_type}/{tmdb_id}",
+                path,
+                language=locale,
                 append_to_response="credits,external_ids,videos,recommendations,alternative_titles",
                 include_video_language=f"{self.language[:2]},en",
             )
         )
-        try:
-            english = self._get(f"/{media_type}/{tmdb_id}", language="en-US")
-            data["english_title"] = english.get("title") or english.get("name") or ""
-        except TMDBError:
-            data["english_title"] = ""
-        try:  # Czech releases are named after the Czech title
-            czech = self._get(f"/{media_type}/{tmdb_id}", language="cs-CZ")
-            data["czech_title"] = czech.get("title") or czech.get("name") or ""
-        except TMDBError:
-            data["czech_title"] = ""
+        for name in TITLE_LANGUAGES:
+            try:
+                source = others[name].result() if name in others else data
+                data[name] = source.get("title") or source.get("name") or ""
+            except TMDBError:
+                data[name] = ""
         external = data.get("external_ids") or {}
         data["imdb_id"] = data.get("imdb_id") or external.get("imdb_id")
         return data

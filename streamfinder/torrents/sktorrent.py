@@ -20,6 +20,7 @@ import time
 
 import requests
 
+from ..caching import LRU
 from ..matching import parse_size, title_similarity
 from .providers import USER_AGENT, RawTorrent
 
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://sktorrent.eu/torrent"
 SESSION_TTL = 6 * 3600
+SEEN_SIZE = (
+    5000  # info hashes of recent results, to know which torrents are SkTorrent's
+)
 # Category ids (from the search form): films, HD/UHD films, series, documentaries, TV shows.
 MOVIE_CATEGORIES = {1, 3, 5, 14, 15, 17, 19, 20, 28, 29, 31, 43}
 TV_CATEGORIES = {16, 17, 42}
@@ -107,7 +111,7 @@ class SkTorrentProvider:
         self._lock = threading.Lock()
         self._logged_in_at = 0.0
         self._announce: list[str] | None = None
-        self._seen: set[str] = set()
+        self._seen: LRU = LRU(SEEN_SIZE)  # info hash -> None
         self.configure(username, password)
 
     def configure(self, username: str, password: str) -> None:
@@ -182,7 +186,8 @@ class SkTorrentProvider:
                 page, query.titles, None if query.free_text else allowed
             ):
                 results.setdefault(item.info_hash, item)
-        self._seen.update(results)
+        for info_hash in results:
+            self._seen[info_hash] = None
         return list(results.values())
 
     def parse(
