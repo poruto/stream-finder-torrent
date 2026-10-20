@@ -1237,13 +1237,29 @@ select option:checked {
 /* ===================================================================== player */
 
 .player {
+  /* side padding of the overlays; keeps buttons clear of notches and rounded corners */
+  --player-pad: clamp(12px, 3vw, 32px);
+  --player-pad-left: max(var(--player-pad), env(safe-area-inset-left));
+  --player-pad-right: max(var(--player-pad), env(safe-area-inset-right));
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
   z-index: 50;
-  display: grid;
+  width: 100%;
+  /* exactly the visible area: on phones `inset: 0` can include the part hidden behind the
+     browser bars, which pushes the video down and the controls off screen */
+  height: 100%;
+  height: 100dvh;
+  height: var(--player-h, 100dvh);
+  overflow: hidden;
   background: #000;
 }
+.player:fullscreen {
+  height: 100%;
+}
 .player video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -1252,6 +1268,14 @@ select option:checked {
 .player video::cue {
   background: rgba(0, 0, 0, 0.6);
   font: 500 clamp(18px, 2.4vw, 32px)/1.3 var(--font);
+}
+/* Subtitles move up above the controls while those are shown (Chromium browsers). */
+.player video::-webkit-media-text-track-container {
+  transform: translateY(-14px);
+  transition: transform 0.3s;
+}
+.player:not(.is-idle) video::-webkit-media-text-track-container {
+  transform: translateY(calc(-1 * var(--controls-h, 0px) + 16px));
 }
 .player.is-idle {
   cursor: none;
@@ -1264,7 +1288,7 @@ select option:checked {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px clamp(12px, 3vw, 32px) 60px;
+  padding: calc(16px + env(safe-area-inset-top)) var(--player-pad-right) 60px var(--player-pad-left);
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent);
   transition: opacity 0.3s;
 }
@@ -1290,7 +1314,7 @@ select option:checked {
   position: absolute;
   inset: auto 0 0 0;
   z-index: 2;
-  padding: 40px clamp(12px, 3vw, 32px) calc(14px + env(safe-area-inset-bottom));
+  padding: 40px var(--player-pad-right) calc(14px + env(safe-area-inset-bottom)) var(--player-pad-left);
   background: linear-gradient(0deg, rgba(0, 0, 0, 0.85), transparent);
   transition: opacity 0.3s;
 }
@@ -2255,11 +2279,20 @@ select option:checked {
   }
   .controls-row {
     flex-wrap: wrap;
+    gap: 0;
   }
   .ctl {
     min-width: 40px;
     height: 40px;
     padding: 0 6px;
+  }
+  /* the time sits above the seek bar so all buttons fit on one row */
+  .time {
+    position: absolute;
+    top: 14px;
+    right: var(--player-pad-right);
+    padding: 0;
+    font-size: 13px;
   }
   .ctl-text span,
   .volume input,
@@ -2293,6 +2326,40 @@ select option:checked {
     grid-row: auto;
     grid-column: 1;
     justify-self: start;
+  }
+}
+
+/* Touch screens: phones change volume with their own buttons. */
+@media (hover: none) {
+  .volume {
+    display: none;
+  }
+}
+
+/* A phone held sideways: wider than the mobile layout but very short. */
+@media (hover: none) and (max-height: 500px) {
+  .player-top {
+    padding-top: calc(8px + env(safe-area-inset-top));
+    padding-bottom: 40px;
+  }
+  .player-controls {
+    padding-top: 24px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+  .ctl {
+    min-width: 40px;
+    height: 40px;
+  }
+  .ctl-text span,
+  .player-stats {
+    display: none;
+  }
+  .player-menu {
+    bottom: 64px;
+    max-height: calc(100vh - 140px);
+  }
+  .player-toast {
+    bottom: 76px;
   }
 }
 

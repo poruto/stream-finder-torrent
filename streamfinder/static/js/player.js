@@ -512,6 +512,7 @@
       : "";
     playerEl.hidden = false;
     document.body.style.overflow = "hidden";
+    fitPlayer();
     closeMenus();
     $("next-btn").hidden = true;
     $("player-stats").textContent = "";
@@ -597,6 +598,22 @@
       3000,
     );
   }
+  // Size the player to the area really visible (phones hide part of the layout viewport
+  // behind the browser bars) and tell the CSS how tall the controls are, so subtitles
+  // can sit above them.
+  const fitPlayer = () => {
+    if (playerEl.hidden) return;
+    const height = document.fullscreenElement ? 0 : window.visualViewport?.height;
+    if (height) playerEl.style.setProperty("--player-h", `${Math.round(height)}px`);
+    else playerEl.style.removeProperty("--player-h");
+    playerEl.style.setProperty("--controls-h", `${$("player-controls").offsetHeight}px`);
+  };
+  window.visualViewport?.addEventListener("resize", fitPlayer);
+  window.addEventListener("resize", fitPlayer);
+  window.addEventListener("orientationchange", () => setTimeout(fitPlayer, 300));
+  document.addEventListener("fullscreenchange", fitPlayer);
+  new ResizeObserver(fitPlayer).observe($("player-controls"));
+
   playerEl.addEventListener("mousemove", wakeControls);
   playerEl.addEventListener("touchstart", wakeControls, { passive: true });
 
@@ -1339,16 +1356,26 @@
     applyVolume();
   };
 
+  const isPhone = window.matchMedia("(hover: none) and (pointer: coarse)");
   const toggleFullscreen = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else playerEl.requestFullscreen?.().catch(() => {});
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    playerEl
+      .requestFullscreen?.({ navigationUI: "hide" })
+      .then(() => {
+        // Phones: a wide video fills the screen only when turned sideways.
+        if (isPhone.matches && video.videoWidth >= video.videoHeight) {
+          screen.orientation?.lock?.("landscape").catch(() => {});
+        }
+      })
+      .catch(() => {});
   };
-  document.addEventListener("fullscreenchange", () =>
-    playerEl.classList.toggle(
-      "is-fullscreen",
-      Boolean(document.fullscreenElement),
-    ),
-  );
+  document.addEventListener("fullscreenchange", () => {
+    playerEl.classList.toggle("is-fullscreen", Boolean(document.fullscreenElement));
+    if (!document.fullscreenElement) screen.orientation?.unlock?.();
+  });
 
   $("ctl-play").addEventListener("click", togglePlay);
   $("ctl-back").addEventListener("click", () => skip(-10));
