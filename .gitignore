@@ -10,3 +10,8 @@ torr/viewed.json
 .playwright-mcp/
 .ruff_cache/
 bin/
+.venv/
+VERSION
+build/
+dist/
+.claude/

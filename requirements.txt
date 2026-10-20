@@ -5,3 +5,5 @@ charset-normalizer==3.4.2
 gunicorn==23.0.0
 # Windows/macOS: ships an ffmpeg binary (Docker, the Pi and Termux install ffmpeg from their package manager)
 imageio-ffmpeg==0.6.0; sys_platform == "win32" or sys_platform == "darwin"
+# Windows: the app server (gunicorn runs only on Linux/Android)
+waitress==3.0.2; sys_platform == "win32"

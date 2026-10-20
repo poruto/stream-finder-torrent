@@ -1,3 +1,6 @@
 # Shell scripts run on the Raspberry Pi: keep LF even on Windows checkouts.
 *.sh text eol=lf
 Dockerfile text eol=lf
+# Windows scripts: CRLF for cmd.exe and Windows PowerShell.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
