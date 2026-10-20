@@ -37,7 +37,6 @@ echo "==> Building the server (a few minutes the first time)"
 cmake -S "$DIR" -B "$DIR/build" -DCMAKE_BUILD_TYPE=Release \
   -DWHISPER_BUILD_TESTS=OFF -DWHISPER_SDL2=OFF -DBUILD_SHARED_LIBS=OFF >/dev/null
 cmake --build "$DIR/build" -j "$(nproc 2>/dev/null || echo 4)" --target whisper-server
-SERVER="$DIR/build/bin/whisper-server"
 
 mkdir -p "$DIR/models"
 CURRENT="$DIR/models/ggml-current.bin"
@@ -57,25 +56,11 @@ if [ ! -s "$DIR/models/ggml-$MODEL.bin" ]; then
 fi
 ln -sfn "ggml-$MODEL.bin" "$CURRENT"
 
-# Phones: the 4 big cores; elsewhere all cores.
-THREADS=$(( $(nproc 2>/dev/null || echo 4) > 4 ? 4 : $(nproc 2>/dev/null || echo 4) ))
-[ "$TERMUX" = 0 ] && THREADS=$(nproc 2>/dev/null || echo 4)
-# The server is started through a wrapper that reads which model is linked:
-# DTW word timing (exact subtitle starts) needs the model's own preset
-# (tiny/base/small), and flash attention off.
-RUNNER="$DIR/run-server.sh"
-cat > "$RUNNER" <<WRAP
-#!/bin/sh
-model=\$(readlink -f "$CURRENT")
-preset=\$(basename "\$model" .bin); preset=\${preset#ggml-}; preset=\${preset%%-q*}
-case "\$preset" in
-  tiny | base | small | medium) set -- --dtw "\$preset" -nfa ;;
-  *) set -- ;;
-esac
-exec "$SERVER" -m "\$model" --host 127.0.0.1 --port $PORT -l auto -t $THREADS \\
-  --inference-path /v1/audio/transcriptions "\$@"
-WRAP
-chmod +x "$RUNNER"
+# The server is started by whisper-run.sh from this repo (model link, threads, word
+# timing), so updates can change how it runs without reinstalling.
+REPO="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+RUNNER="sh $REPO/whisper-run.sh"
+export WHISPER_DIR="$DIR" WHISPER_PORT="$PORT"
 
 if [ "$TERMUX" = 1 ]; then
   SV="$PREFIX/var/service/streamfinder-whisper"
@@ -83,6 +68,7 @@ if [ "$TERMUX" = 1 ]; then
   cat > "$SV/run" <<RUN
 #!/data/data/com.termux/files/usr/bin/sh
 exec 2>&1
+export WHISPER_DIR="$DIR" WHISPER_PORT="$PORT"
 exec $RUNNER
 RUN
   chmod +x "$SV/run"
@@ -99,7 +85,8 @@ After=network.target
 
 [Service]
 User=$USER
-ExecStart=$RUNNER
+Environment=HOME=$HOME WHISPER_DIR=$DIR WHISPER_PORT=$PORT
+ExecStart=/bin/$RUNNER
 Restart=always
 Nice=10
 

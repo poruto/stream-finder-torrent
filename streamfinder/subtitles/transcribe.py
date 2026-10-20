@@ -175,6 +175,34 @@ def clean_segments(
     return lines
 
 
+_SENTENCE_END = re.compile(r"[.!?…。！？]['\"”」)]*$")
+MAX_LINE = 110  # characters: longer sentences stay split (two subtitle lines at most)
+
+
+def merge_sentences(lines: list[Line]) -> list[Line]:
+    """Join Whisper's pieces into whole sentences.
+
+    Whisper often cuts a sentence in two ("I was told some of you are" /
+    "unhappy with my plan."): translated piece by piece that reads badly.
+    Pieces are joined while a sentence goes on, the gap is short and the
+    result still fits on screen.
+    """
+    merged: list[Line] = []
+    for line in lines:
+        last = merged[-1] if merged else None
+        if (
+            last
+            and not _SENTENCE_END.search(last.text)
+            and line.start - last.end < 1.2
+            and len(last.text) + len(line.text) < MAX_LINE
+        ):
+            last.text = f"{last.text} {line.text}"
+            last.end = max(last.end, line.end)
+            continue
+        merged.append(Line(line.start, line.end, line.text))
+    return merged
+
+
 class Transcriber:
     def __init__(
         self,
@@ -410,6 +438,7 @@ class Transcriber:
             data.get("words") or [],
         )
         lines = [line for line in lines if start <= line.start < start + duration]
+        lines = merge_sentences(lines)
         translated = False
         if translate_to and lines and detected != translate_to:
             try:

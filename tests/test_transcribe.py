@@ -1,8 +1,10 @@
 from streamfinder.subtitles.sync import align, align_text, confirm
 from streamfinder.subtitles.transcribe import (
+    Line,
     Transcriber,
     api_url_for,
     clean_segments,
+    merge_sentences,
     pick_speech_model,
 )
 
@@ -114,3 +116,19 @@ def test_local_whisper_server_needs_no_key():
         pick_speech_model({"whisper-large-v3", "whisper-large-v3-turbo"})
         == "whisper-large-v3-turbo"
     )
+
+
+def test_pieces_of_one_sentence_become_one_line():
+    lines = [
+        Line(600.8, 602.9, "Step forward."),
+        Line(604.4, 606.6, "I was told some of you are"),
+        Line(606.6, 607.4, "unhappy with my plan."),
+        Line(611.0, 612.0, "Who said"),
+    ]
+    merged = merge_sentences(lines)
+    assert [(m.start, m.text) for m in merged] == [
+        (600.8, "Step forward."),
+        (604.4, "I was told some of you are unhappy with my plan."),
+        (611.0, "Who said"),
+    ]
+    assert merged[1].end == 607.4

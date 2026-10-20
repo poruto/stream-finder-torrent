@@ -195,6 +195,19 @@ chmod +x "$HOME/.termux/boot/streamfinder"
 if [ ! -x "$HOME/whisper.cpp/build/bin/whisper-server" ] && [ ! -f "$DIR/cache/.no-whisper" ]; then
   bash "$DIR/install-whisper.sh" || echo "!! Local Whisper could not be installed - AI subtitles can use a Groq key instead (Settings)."
 fi
+# Already installed: run it the way this version wants (repo's whisper-run.sh).
+WSV="$PREFIX/var/service/streamfinder-whisper"
+if [ -x "$HOME/whisper.cpp/build/bin/whisper-server" ] && [ -d "$WSV" ] && ! grep -q "whisper-run.sh" "$WSV/run" 2>/dev/null; then
+  printf '#!/data/data/com.termux/files/usr/bin/sh
+exec 2>&1
+export WHISPER_DIR="%s" WHISPER_PORT=8178
+exec sh %s/whisper-run.sh
+' "$HOME/whisper.cpp" "$DIR" > "$WSV/run"
+  chmod +x "$WSV/run"
+  sv restart streamfinder-whisper >/dev/null 2>&1 || true
+elif [ -d "$WSV" ]; then
+  sv restart streamfinder-whisper >/dev/null 2>&1 || true  # new run settings come with the update
+fi
 if [ -x "$HOME/whisper.cpp/build/bin/whisper-server" ] && ! grep -q '^TRANSCRIBE_PROVIDER=' "$DIR/.env"; then
   { echo "TRANSCRIBE_PROVIDER=local"; echo "TRANSCRIBE_API_URL=http://127.0.0.1:8178/v1"; } >> "$DIR/.env"
 fi
