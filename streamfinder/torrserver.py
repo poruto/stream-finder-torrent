@@ -244,6 +244,15 @@ class TorrServerClient:
             raise TorrServerError("TorrServer returned no info hash")
         return info_hash.lower()
 
+    def preload(self, info_hash: str, file: TorrentFile, timeout: int = 180) -> None:
+        """Download the start of `file` now (TorrServer's PreloadCache share of its cache),
+        so playing it later starts at once. Blocks until TorrServer is done."""
+        self.session.get(
+            f"{self.base_url}{self.stream_path}/{quote(file.name)}"
+            f"?link={info_hash}&index={file.index}&preload",
+            timeout=timeout,
+        ).close()
+
     def drop(self, info_hash: str) -> None:
         """Stop downloading a torrent now (it stays in TorrServer's list for a quick restart)."""
         self._post({"action": "drop", "hash": info_hash}, timeout=5)

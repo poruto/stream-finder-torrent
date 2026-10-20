@@ -46,6 +46,7 @@
     stallStart: null,
     switching: false,
     prefetched: false,
+    preloaded: null, // hash of the next episode's torrent warmed up in TorrServer
     timers: {},
     // Bumped by every play() and by closing the player: older async work sees it and stops.
     playGen: 0,
@@ -667,6 +668,7 @@
     state.playGen += 1;
     saveProgress(true);
     if (state.current?.hash) stopTorrent(state.current.hash);
+    dropPreloaded(state.current?.hash);
     Object.keys(state.timers).forEach(clearTimer);
     state.countdown = false;
     state.skipTarget = null;
@@ -944,6 +946,7 @@
         if (playerEl.hidden || state.playMagnet !== torrent.magnet) releaseTorrent(data.hash);
         return;
       }
+      dropPreloaded(data.hash);
       if (
         forcedStart === null &&
         stored &&
@@ -1322,7 +1325,10 @@
     ) {
       state.prefetched = true;
       const next = nextEpisodeOf(state.current.target);
-      if (next) findVersions(next).catch(() => {});
+      if (next)
+        findVersions(next)
+          .then((data) => preloadNext(next, data))
+          .catch(() => {});
     }
   });
   video.addEventListener("pause", () => {
@@ -1344,6 +1350,34 @@
   const someoneIsThere = () => (state.autoPlays = 0);
   playerEl.addEventListener("pointerdown", someoneIsThere, true);
   document.addEventListener("keydown", someoneIsThere, true);
+
+  // The next episode's recommended version is started in TorrServer while this one plays
+  // and the start of its file downloaded, so the countdown ends in a picture, not a
+  // spinner. Not with Data saver (it would download an episode that may never be
+  // watched) or when episodes don't play on by themselves.
+  async function preloadNext(next, data) {
+    const current = state.current;
+    const best = recommendedOf(data);
+    if (!best?.magnet || !SF.settings.get().autoNext || SF.settings.quality() === "saver") return;
+    try {
+      const reply = await api("/api/preload", {
+        magnet: best.magnet,
+        season: next.season,
+        episode: next.episode,
+        title: `${ctx.title} S${String(next.season).padStart(2, "0")}E${String(next.episode).padStart(2, "0")}`,
+        poster: ctx.poster,
+      });
+      if (current === state.current) state.preloaded = reply.hash;
+      else if (reply.hash !== state.current?.hash) releaseTorrent(reply.hash);
+    } catch {
+      /* the next episode just starts the usual way */
+    }
+  }
+  // A warmed-up torrent nobody is going to play (another version won, or the player closed).
+  function dropPreloaded(keep) {
+    if (state.preloaded && state.preloaded !== keep) releaseTorrent(state.preloaded);
+    state.preloaded = null;
+  }
 
   function cancelCountdown() {
     if (!state.countdown) return;

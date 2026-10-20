@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import threading
 import time
 import unicodedata
 from dataclasses import replace
@@ -273,6 +274,36 @@ def play():
         file=chosen.to_dict(),
         files=[f.to_dict() for f in video_files(files)],
     )
+
+
+@api.route("/preload", methods=["POST"])
+def preload():
+    """Body: {magnet, season?, episode?, title?, poster?} - the next episode, while the
+    current one plays: added to TorrServer at once, its file's start downloaded in the
+    background, so /play starts it without waiting. Answers with the hash right away."""
+    body = _body()
+    magnet = normalize_magnet(body.get("magnet", ""))
+    if not magnet:
+        return jsonify(success=False, error=t("err_bad_magnet")), 400
+    torrserver = services().torrserver
+    try:
+        info_hash = torrserver.add(
+            magnet, title=body.get("title") or "", poster=body.get("poster") or ""
+        )
+    except TorrServerError as e:
+        return _torrserver_error(e)
+    season, episode = _int(body.get("season")), _int(body.get("episode"))
+
+    def warm_up():
+        try:
+            file = select_video_file(torrserver.files(info_hash, wait=60), season, episode)
+            if file is not None:
+                torrserver.preload(info_hash, file)
+        except (TorrServerError, requests.RequestException) as e:
+            logger.info("preloading %s failed: %s", info_hash, e)
+
+    threading.Thread(target=warm_up, daemon=True).start()
+    return jsonify(success=True, hash=info_hash)
 
 
 def _torrent_file(info_hash: str, index: int):
