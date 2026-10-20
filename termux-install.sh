@@ -17,12 +17,17 @@ SV="$PREFIX/var/service"
 echo "==> Installing packages"
 # --force-confnew: never stop and ask about changed config files (stdin is the curl pipe).
 APT_OPTS=(-y -o Dpkg::Options::=--force-confnew)
+# A half-configured ffmpeg from an earlier failed run blocks every apt command; drop it.
+if ! dpkg --configure -a; then
+  dpkg --remove --force-remove-reinstreq ffmpeg || true
+fi
 # A full upgrade first: new packages (ffmpeg) need current libraries, a partly
 # updated Termux fails with "library ... not found" errors.
 pkg upgrade "${APT_OPTS[@]}"
 pkg install "${APT_OPTS[@]}" python git curl termux-services procps
 # ffmpeg (incl. ffprobe) converts AC3/DTS audio; without it everything else still works.
 if ! pkg install "${APT_OPTS[@]}" ffmpeg || ! ffmpeg -version >/dev/null 2>&1; then
+  dpkg --remove --force-remove-reinstreq ffmpeg >/dev/null 2>&1 || true  # don't leave apt broken
   echo "!! ffmpeg could not be installed - audio conversion and subtitle sync are disabled."
   echo "!! Fix later with: pkg upgrade && pkg install ffmpeg && streamfinder restart"
 fi
