@@ -612,8 +612,11 @@ def score_torrent(
         similarity = 1.0 if id_match else title_similarity(info.title, target.titles)
         if similarity < 0.8:
             return None
-        if not id_match and not same_numbers(info.title, target.titles):
-            return None  # a sequel or prequel of the title
+        # A sequel or prequel of the title - unless the year is exactly the film's own
+        # ("Alien.3.1992" for "Alien³", "Scream.5.2022" for the 2022 "Scream").
+        exact_year = bool(target.year and info.year == target.year)
+        if not id_match and not exact_year and not same_numbers(info.title, target.titles):
+            return None
         score += (similarity - 0.8) * 50  # up to +10 for exact title
 
         if target.media_type == "movie":

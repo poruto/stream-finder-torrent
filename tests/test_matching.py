@@ -227,7 +227,7 @@ def test_sequel_numbers_are_a_different_film():
     assert score("Scream.II.1997.1080p.BluRay.x264", sequel) is not None
     part_one = MatchTarget(titles=["Dune: Part One"], year=2021)
     assert score("Dune.Part.1.2021.1080p.WEB-DL", part_one) is not None
-    assert score("Dune.Part.Two.2021.1080p.WEB-DL", part_one) is None
+    assert score("Dune.Part.Two.2024.1080p.WEB-DL", part_one) is None
 
 
 def test_same_name_shows_by_year_and_country():
@@ -317,3 +317,13 @@ def test_slash_in_name_keeps_the_part_with_the_year():
     assert parse_release("Dune Part One (2021) 1080p BluRay EN/ITA").year == 2021
     assert parse_release("Duna / Dune (2021) CZ dabing").title == "dune"
     assert parse_release("Show/Season 1/Show.S01E02.1080p.mkv").episodes == [2]
+
+
+def test_sequel_number_with_the_films_own_year_is_kept():
+    alien3 = MatchTarget(titles=["Alien³"], year=1992, media_type="movie")
+    assert score_torrent(parse_release("Alien.3.1992.1080p.BluRay.x264"), 50, 2 * 1024**3, alien3) is not None
+    scream = MatchTarget(titles=["Scream"], year=2022, media_type="movie")
+    assert score_torrent(parse_release("Scream.5.2022.1080p.WEB-DL"), 50, 2 * 1024**3, scream) is not None
+    # Still rejected: a sequel from another year.
+    scream_1996 = MatchTarget(titles=["Scream"], year=1996, media_type="movie")
+    assert score_torrent(parse_release("Scream.2.1997.1080p.BluRay"), 50, 2 * 1024**3, scream_1996) is None
