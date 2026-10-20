@@ -690,6 +690,10 @@
 
   // ---------------------------------------------------------- live search
   const searchInput = document.getElementById("nav-search-input");
+  // The header's search pill shrinks to its icon on tablets: a tap anywhere on it opens it.
+  searchInput?.form.addEventListener("click", (event) => {
+    if (event.target !== searchInput) searchInput.focus();
+  });
   const searchGrid = document.getElementById("search-grid");
   let searchTimer;
   let searchSeq = 0;

@@ -18,7 +18,8 @@
   --ok: #f5c518;
   --bad: #ff6b5b;
   --radius: 6px;
-  --gutter: clamp(16px, 4vw, 60px);
+  /* page sides; never under a notch of a phone held sideways (viewport-fit=cover) */
+  --gutter: max(clamp(16px, 4vw, 60px), env(safe-area-inset-left), env(safe-area-inset-right));
   --nav-h: 68px;
   --font: "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-logo: "Bebas Neue", "Onest", sans-serif;
@@ -121,11 +122,11 @@ p {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 30;
-  height: var(--nav-h);
+  height: calc(var(--nav-h) + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: clamp(12px, 2.5vw, 32px);
-  padding: 0 var(--gutter);
+  padding: env(safe-area-inset-top) var(--gutter) 0; /* below the status bar of a full-screen app */
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
   transition: background-color 0.3s;
 }
@@ -548,7 +549,7 @@ select option:checked {
   min-height: min(88vh, 860px);
   display: flex;
   align-items: flex-end;
-  padding: calc(var(--nav-h) + 40px) var(--gutter) clamp(48px, 9vh, 110px);
+  padding: calc(var(--nav-h) + env(safe-area-inset-top) + 40px) var(--gutter) clamp(48px, 9vh, 110px);
 }
 .hero-backdrop {
   position: absolute;
@@ -793,6 +794,7 @@ select option:checked {
   top: 8px;
   right: 8px;
   z-index: 1;
+  max-width: calc(100% - 16px); /* the narrow posters of a phone: two lines */
   padding: 2px 7px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.78);
@@ -800,7 +802,7 @@ select option:checked {
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: right;
 }
 
 /* "New episode" on a show's poster or continue-watching card */
@@ -832,9 +834,7 @@ select option:checked {
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: right; /* wraps on a narrow poster rather than losing the date */
   pointer-events: none;
 }
 
@@ -932,7 +932,7 @@ select option:checked {
 /* ====================================================================== pages */
 
 .page {
-  padding: calc(var(--nav-h) + 24px) var(--gutter) 56px;
+  padding: calc(var(--nav-h) + env(safe-area-inset-top) + 24px) var(--gutter) 56px;
 }
 .page-narrow {
   max-width: 760px;
@@ -1136,7 +1136,8 @@ select option:checked {
   z-index: 60;
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   background: rgba(0, 0, 0, 0.82);
 }
 .profile-panel {
@@ -1179,9 +1180,8 @@ select option:checked {
 }
 .profile-choice span:last-child {
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.3;
+  overflow-wrap: anywhere; /* a long name wraps instead of losing its end */
 }
 .profile-form {
   display: grid;
@@ -1852,7 +1852,7 @@ select option:checked {
 
 .player-menu {
   position: absolute;
-  right: clamp(12px, 3vw, 32px);
+  right: var(--player-pad-right);
   bottom: 96px;
   z-index: 3;
   width: min(480px, calc(100vw - 24px));
@@ -1992,6 +1992,7 @@ select option:checked {
 }
 .lang-chip small {
   color: inherit;
+  font-size: 12px;
   opacity: 0.6;
 }
 .lang-tag .flag {
@@ -2065,9 +2066,7 @@ select option:checked {
   display: block;
   font-size: 12px;
   color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .subs-autosync {
   justify-self: start;
@@ -2083,6 +2082,10 @@ select option:checked {
 .subs-sync span {
   margin-right: auto;
   color: var(--text-2);
+}
+.subs-sync .tool-btn {
+  flex: none;
+  white-space: nowrap;
 }
 .subs-sync output {
   min-width: 52px;
@@ -2334,6 +2337,7 @@ select option:checked {
   height: 100%;
   display: flex;
   flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 0;
   background: var(--surface);
   box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
   animation: sheet-in 0.25s ease-out;
@@ -2366,7 +2370,7 @@ select option:checked {
   display: grid;
   align-content: start;
   gap: 4px;
-  padding: 18px 24px 40px;
+  padding: 18px 24px calc(40px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 .sheet-quality {
@@ -2888,6 +2892,7 @@ select option:checked {
 
   .nav {
     flex-wrap: nowrap;
+    gap: 8px;
   }
   .nav-logo {
     font-size: 28px;
@@ -2902,13 +2907,18 @@ select option:checked {
   .nav-status {
     margin-left: auto;
   }
+  .nav-logo {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
   .is-search {
     --nav-h: 112px;
   }
   .is-search .nav {
     height: auto;
     flex-wrap: wrap;
-    padding-top: 10px;
+    padding-top: calc(10px + env(safe-area-inset-top));
     padding-bottom: 10px;
   }
   .is-search .nav-search {
@@ -2930,8 +2940,9 @@ select option:checked {
     z-index: 40;
     display: grid;
     grid-auto-flow: column; /* one row however many tabs there are */
-    grid-auto-columns: minmax(0, 1fr);
-    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    grid-auto-columns: 1fr; /* equal, unless a label needs more room than its share */
+    padding: 6px max(4px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom))
+      max(4px, env(safe-area-inset-left));
     border-top: 1px solid var(--line);
     background: rgba(20, 20, 20, 0.96);
     backdrop-filter: blur(10px);
@@ -2940,9 +2951,9 @@ select option:checked {
     display: grid;
     justify-items: center;
     gap: 2px;
-    min-width: 0;
+    min-width: max-content; /* the whole label; the other tabs give way */
     padding: 4px 0;
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
     text-decoration: none;
   }
@@ -3084,11 +3095,13 @@ select option:checked {
     bottom: 0;
     width: 100%;
     max-height: 70vh;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom)); /* above the home indicator */
     border-radius: 12px 12px 0 0;
   }
 
   .sheet-panel {
     width: 100%;
+    padding-left: env(safe-area-inset-left);
     animation-name: sheet-up;
   }
   .version {
@@ -3112,6 +3125,120 @@ select option:checked {
     grid-row: auto;
     grid-column: 1;
     justify-self: start;
+  }
+}
+
+/* Between phone and desktop (tablets, phones held sideways, TVs): the header keeps the
+   links, the search shrinks; the language, version and TorrServer label are in Settings
+   and Status. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .nav {
+    gap: 12px;
+  }
+  .nav-logo {
+    font-size: 28px;
+  }
+  .nav-version,
+  .nav-lang,
+  .nav-status-label {
+    display: none;
+  }
+  .nav-links {
+    gap: 4px;
+  }
+  .nav-links a {
+    padding: 0 6px;
+  }
+  .nav-search,
+  .nav-search:focus-within {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 44px;
+    padding: 0 12px;
+  }
+  .nav-search:focus-within {
+    position: absolute;
+    left: var(--gutter);
+    right: var(--gutter);
+    top: calc(env(safe-area-inset-top) + var(--nav-h) / 2);
+    transform: translateY(-50%);
+    background: var(--bg); /* over the links it covers */
+  }
+}
+
+/* Touch screens and narrow windows: everything tappable is at least 40 x 40 (the visible
+   part may stay smaller), and inputs use 16px so iOS doesn't zoom the page into them. */
+@media (max-width: 1100px), (hover: none) and (pointer: coarse) {
+  .nav-logo,
+  .nav-links a,
+  .nav-status,
+  .tool-btn,
+  .chip,
+  .filter-clear,
+  .episode-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+  }
+  .nav-links a,
+  .nav-status {
+    min-width: 40px;
+  }
+  .nav-icon,
+  .menu-close,
+  .episode-watched {
+    width: 40px;
+    height: 40px;
+  }
+  .nav-icon,
+  .nav-status {
+    flex: none;
+  }
+  .nav-profile {
+    width: 40px;
+    height: 40px;
+    padding: 4px;
+    border-radius: 12px;
+    background-clip: content-box;
+  }
+  .wide-remove {
+    top: 3px;
+    right: 3px;
+    width: 40px;
+    height: 40px;
+    padding: 5px;
+    background-clip: content-box;
+  }
+  .profile-colors button {
+    width: 40px;
+    height: 40px;
+    padding: 4px;
+    background-clip: content-box;
+  }
+  .key-login summary {
+    padding: 10px 0;
+  }
+  .nav-search input[type="search"],
+  .browse-search input[type="search"],
+  .filter-pill select,
+  .sheet-quality select,
+  .player-file select {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  /* the seek bar: a 40px tall strip to grab, drawn as before */
+  .seek {
+    height: 40px;
+    margin: -9px 0;
+  }
+}
+
+/* The narrowest phones: the logo, the profile and the TorrServer dot (the version is in the
+   footer). */
+@media (max-width: 400px) {
+  .nav-version {
+    display: none;
   }
 }
 
@@ -3149,6 +3276,14 @@ select option:checked {
 @media (hover: none) {
   .volume {
     display: none;
+  }
+  /* what a mouse finds by hovering is always there */
+  .seek-thumb {
+    transform: scale(1);
+  }
+  .episode:not(.is-unaired) .play-badge {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.2);
   }
 }
 
