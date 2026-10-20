@@ -114,7 +114,9 @@ def send(title: str, text: str, link: str = "") -> None:
     if url := _setting("NOTIFY_NTFY_URL"):
         # Title and link as URL parameters: headers can't carry Czech letters.
         params = {"title": title, "tags": "tv", **({"click": link} if link else {})}
-        requests.post(url, params=params, data=text.encode("utf-8"), timeout=15).raise_for_status()
+        requests.post(
+            url, params=params, data=text.encode("utf-8"), timeout=15
+        ).raise_for_status()
     token, chat = _setting("NOTIFY_TELEGRAM_TOKEN"), _setting("NOTIFY_TELEGRAM_CHAT")
     if token and chat:
         requests.post(
@@ -150,7 +152,13 @@ def check_once(today: datetime.date | None = None) -> list[str]:
     notified = _read_notified()
     sent = []
     base = _setting("PUBLIC_URL").rstrip("/") or _lan_url()
-    for tmdb_id, watched in followed_shows(shared._read()).items():
+    shows: dict[int, int] = {}
+    for part in shared.all_parts(
+        shared._read()
+    ):  # new until everyone who follows it saw it
+        for show_id, watched in followed_shows(part).items():
+            shows[show_id] = min(shows.get(show_id, watched), watched)
+    for tmdb_id, watched in shows.items():
         try:
             latest = tmdb.latest_episode(tmdb_id)
         except TMDBError:

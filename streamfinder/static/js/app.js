@@ -113,7 +113,19 @@
   // Watch progress per title: { "<type>:<id>": { title, backdrop, url, season, episode,
   //   position, duration, magnet, fileIndex, updated, episodes: { "1x3": {position, duration} } } }
   // A removed title stays as { removed: true, updated } so other devices learn about it.
-  const progressStore = store("streamfinder.progress.v1", () => ({}));
+  // The profile this device watches as ("" = the household's default one; see
+  // profiles.js): progress and My list are kept per profile.
+  const PROFILE = (() => {
+    try {
+      return localStorage.getItem("streamfinder.profile") || "";
+    } catch {
+      return "";
+    }
+  })();
+  SF.profile = PROFILE;
+  const perProfile = (key) => (PROFILE ? `${key}.p.${PROFILE}` : key);
+  const sharedUrl = PROFILE ? `/api/shared?profile=${encodeURIComponent(PROFILE)}` : "/api/shared";
+  const progressStore = store(perProfile("streamfinder.progress.v1"), () => ({}));
   SF.progress = {
     all: () => Object.fromEntries(Object.entries(progressStore.read()).filter(([, p]) => !p.removed)),
     get: (key) => {
@@ -136,8 +148,8 @@
   };
 
   // My list: [{ key, id, type, title, poster, url, added }]; removed keys: { key: time }
-  const listStore = store("streamfinder.mylist.v1", () => []);
-  const listRemovedStore = store("streamfinder.mylist.removed.v1", () => ({}));
+  const listStore = store(perProfile("streamfinder.mylist.v1"), () => []);
+  const listRemovedStore = store(perProfile("streamfinder.mylist.removed.v1"), () => ({}));
   SF.myList = {
     all: () => listStore.read(),
     has: (key) => listStore.read().some((i) => i.key === key),
@@ -229,10 +241,19 @@
     syncTimer = null;
     try {
       // Merged into what is stored now: a change made while the request ran is kept.
-      mergeShared(await SF.api("/api/shared", sharedBody()));
+      mergeShared(await SF.api(sharedUrl, sharedBody()));
       document.dispatchEvent(new CustomEvent("sf:shared"));
-    } catch {
-      /* offline or an older server: this device's own copy still works */
+    } catch (error) {
+      // The profile was removed on another device: back to the household's one.
+      if (PROFILE && error.data?.success === false) {
+        try {
+          localStorage.removeItem("streamfinder.profile");
+        } catch {
+          /* blocked storage: nothing to forget */
+        }
+        location.reload();
+      }
+      /* otherwise offline or an older server: this device's own copy still works */
     }
   };
   // Not more often than every few seconds while a film saves its position.
@@ -242,7 +263,7 @@
   addEventListener("pagehide", () => {
     if (syncTimer === null) return;
     clearTimeout(syncTimer);
-    navigator.sendBeacon?.("/api/shared", new Blob([JSON.stringify(sharedBody())], { type: "application/json" }));
+    navigator.sendBeacon?.(sharedUrl, new Blob([JSON.stringify(sharedBody())], { type: "application/json" }));
   });
   SF.syncShared();
 

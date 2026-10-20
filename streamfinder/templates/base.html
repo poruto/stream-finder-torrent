@@ -45,6 +45,7 @@
         <a href="{{ url_for('web.set_language', code=code, next=request.full_path) }}" {% if code == lang %}aria-current="true"{% endif %} lang="{{ code }}">{{ code | upper }}</a>
       {% endfor %}
     </div>
+    <button class="nav-profile" id="profile-btn" type="button" aria-haspopup="dialog" aria-label="{{ t('profile_switch') }}" title="{{ t('profile_switch') }}" hidden></button>
     <a class="nav-icon" href="{{ url_for('web.settings') }}" title="{{ t('nav_settings') }}" aria-label="{{ t('nav_settings') }}" {% if request.endpoint == 'web.settings' %}aria-current="page"{% endif %}>
       <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
     </a>
@@ -76,6 +77,7 @@
 
   {% block overlays %}{% endblock %}
   <script src="{{ asset('js/app.js') }}" defer></script>
+  <script src="{{ asset('js/profiles.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

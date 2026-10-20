@@ -5,6 +5,10 @@ started on the TV continues on the phone. Entry by entry the newer change wins;
 removals stay as markers ({"removed": true} / listRemoved) so that another device
 can't bring a removed entry back. Markers are dropped after 90 days.
 
+Profiles ("Who's watching?"): the top-level progress/list/listRemoved are the
+household's default profile (so nothing needs migrating); every other profile keeps
+the same three under data.<id>, and its name and colour under profiles.<id>.
+
 Also the small TMDB lookups the home page builds on that state: new and next episodes
 of the shows being watched, and recommendations for the titles watched last.
 """
@@ -12,6 +16,8 @@ of the shows being watched, and recommendations for the titles watched last.
 import json
 import logging
 import os
+import re
+import secrets
 import tempfile
 import threading
 import time
@@ -20,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 
 from . import config
-from .i18n import tmdb_locale
+from .i18n import t, tmdb_locale
 from .services import services
 from .tmdb import TMDBError
 from .views import cards
@@ -30,6 +36,8 @@ logger = logging.getLogger(__name__)
 shared = Blueprint("shared", __name__)
 PATH = os.path.join(config.BASE_DIR, "cache", "shared.json")
 KEEP_MARKERS = 90 * 86400 * 1000  # ms, like the browsers' Date.now()
+MAX_PROFILES = 8
+_PROFILE_ID = re.compile(r"[0-9a-f]{8}")
 _lock = threading.Lock()
 
 
@@ -107,6 +115,28 @@ def _write(data: dict) -> None:
         raise
 
 
+def profile_part(data: dict, profile: str) -> dict:
+    """One profile's progress, list and listRemoved ("" = the default profile)."""
+    source = data if not profile else (data.get("data") or {}).get(profile) or {}
+    return {key: source.get(key) or {} for key in _empty()}
+
+
+def all_parts(data: dict) -> list[dict]:
+    """Every profile's state (the new-episode notifier looks at all of them)."""
+    return [profile_part(data, "")] + [
+        profile_part(data, p) for p in (data.get("profiles") or {})
+    ]
+
+
+def _store_part(data: dict, profile: str, part: dict) -> dict:
+    data = dict(data)
+    if profile:
+        data["data"] = {**(data.get("data") or {}), profile: part}
+    else:
+        data.update(part)
+    return data
+
+
 def _response(data: dict):
     items = sorted(data["list"].values(), key=lambda i: _time(i, "added"), reverse=True)
     return jsonify(
@@ -117,21 +147,96 @@ def _response(data: dict):
     )
 
 
+def _save(data: dict) -> None:
+    try:
+        _write(data)
+    except OSError as e:  # read-only disk: still answer with the merge
+        logger.warning("shared state not saved: %s", e)
+
+
 @shared.route("/api/shared", methods=["GET", "POST"])
 def shared_state():
-    """GET: the household's copy. POST {progress, list, listRemoved}: merge and return it."""
+    """GET: the profile's copy. POST {progress, list, listRemoved}: merge and return it.
+    ?profile=<id>: that profile ("" or none = the default one); 404 once it was removed."""
+    profile = request.args.get("profile", "")
     with _lock:
         data = _read()
+        if profile and profile not in (data.get("profiles") or {}):
+            return jsonify(success=False, error=t("profile_gone")), 404
+        part = profile_part(data, profile)
         if request.method == "POST":
             incoming = request.get_json(silent=True, force=True) or {}
-            merged = merge(data, incoming)
-            if merged != data:
-                try:
-                    _write(merged)
-                except OSError as e:  # read-only disk: still answer with the merge
-                    logger.warning("shared state not saved: %s", e)
-            data = merged
-    return _response(data)
+            merged = merge(part, incoming)
+            if merged != part:
+                _save(_store_part(data, profile, merged))
+            part = merged
+    return _response(part)
+
+
+def _profiles(data: dict) -> list[dict]:
+    named = data.get("profiles") or {}
+    default = data.get("defaultProfile") or {}
+    return [
+        {
+            "id": "",
+            "name": default.get("name") or t("profile_default"),
+            "color": default.get("color") or 0,
+        }
+    ] + [
+        {
+            "id": pid,
+            "name": p.get("name") or "?",
+            "color": p.get("color") or 0,
+            "kids": bool(p.get("kids")),
+        }
+        for pid, p in sorted(
+            named.items(), key=lambda item: item[1].get("created") or 0
+        )
+    ]
+
+
+@shared.route("/api/profiles", methods=["GET", "POST"])
+def profiles():
+    """The household's profiles. POST {action: "add" | "edit" | "remove", id?, name?, color?}."""
+    if request.method == "GET":
+        return jsonify(success=True, profiles=_profiles(_read()))
+    body = request.get_json(silent=True) or {}
+    action, pid = body.get("action"), str(body.get("id") or "")
+    name = str(body.get("name") or "").strip()[:30]
+    try:
+        color = max(0, min(11, int(body.get("color") or 0)))
+    except (TypeError, ValueError):
+        color = 0
+    with _lock:
+        data = _read()
+        named = dict(data.get("profiles") or {})
+        if action == "add":
+            if not name:
+                return jsonify(success=False, error=t("profile_name_needed")), 400
+            if len(named) + 1 >= MAX_PROFILES:
+                return jsonify(
+                    success=False, error=t("profile_limit", n=MAX_PROFILES)
+                ), 400
+            pid = secrets.token_hex(4)
+            named[pid] = {"name": name, "color": color, "created": time.time()}
+        elif action == "edit" and pid == "":
+            data["defaultProfile"] = {"name": name, "color": color}
+        elif action == "edit" and pid in named:
+            named[pid] = {
+                **named[pid],
+                **({"name": name} if name else {}),
+                "color": color,
+            }
+        elif action == "remove" and _PROFILE_ID.fullmatch(pid) and pid in named:
+            del named[pid]
+            data["data"] = {
+                k: v for k, v in (data.get("data") or {}).items() if k != pid
+            }
+        else:
+            return jsonify(success=False, error=t("err_not_found")), 404
+        data["profiles"] = named
+        _save(data)
+    return jsonify(success=True, id=pid, profiles=_profiles(data))
 
 
 @shared.route("/api/new-episodes")
