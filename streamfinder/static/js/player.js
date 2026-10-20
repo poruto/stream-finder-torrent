@@ -1322,6 +1322,13 @@
   for (const type of ["playing", "seeked", "durationchange", "ratechange"]) video.addEventListener(type, updatePositionState);
 
   // Stops the "next episode in N s" countdown, if one is running.
+  // Episodes started by the countdown since the last press of a key or a click.
+  const STILL_WATCHING_AFTER = 3;
+  state.autoPlays = 0;
+  const someoneIsThere = () => (state.autoPlays = 0);
+  playerEl.addEventListener("pointerdown", someoneIsThere, true);
+  document.addEventListener("keydown", someoneIsThere, true);
+
   function cancelCountdown() {
     if (!state.countdown) return;
     state.countdown = false;
@@ -1334,6 +1341,15 @@
     saveProgress(true);
     const next = state.current && nextEpisodeOf(state.current.target);
     if (!next || !SF.settings.get().autoNext) return;
+    // Several episodes in a row without anyone touching anything: ask before the next
+    // one (asleep on the sofa - no need to download the rest of the season).
+    if (state.autoPlays >= STILL_WATCHING_AFTER) {
+      showMessage(t("still_watching"), t("season_episode", { s: next.season, e: next.episode }), [
+        actionButton(t("still_watching_yes"), () => play(next, { resume: false }), true),
+        actionButton(t("close"), closePlayer),
+      ]);
+      return;
+    }
     let seconds = 8;
     const playNow = actionButton(
       t("play_now"),
@@ -1349,6 +1365,7 @@
       );
       if (seconds-- <= 0) {
         state.countdown = false;
+        state.autoPlays += 1;
         play(next, { resume: false });
       } else setTimer("next", tick, 1000);
     };
