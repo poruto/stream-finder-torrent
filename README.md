@@ -6,18 +6,36 @@ Your own Netflix-style front end for torrents. Browse movies and shows, press
 sync. Works on a PC, a Raspberry Pi or an Android phone; you watch in any browser
 on your network (TV, phone, laptop). English and Czech.
 
+![StreamFinder home page](images/home.jpg)
+
+<sub>[The whole home page](images/home-full.jpg)</sub>
+
 What it does for you:
 
 - searches YTS, EZTV, The Pirate Bay, Knaben, Torrents-CSV and SkTorrent at once and
-  picks the release that will actually play: right episode, sensible size, no cam
-  rips, no AI upscales
+  picks the release that will actually play: the right film (remakes and same-name
+  shows told apart by year and IMDb id), the right episode, a sensible size, no cam
+  rips, no AI upscales - or the smallest good one with *Data saver*
 - Czech dubbing and Czech subtitles first, if you want them
 - converts audio browsers can't play (AC3, DTS) on the fly
-- subtitles from the torrent and OpenSubtitles, synced to the speech, machine
-  translated when your language is missing, or written live from the audio by
-  Whisper (AI subtitles)
+- subtitles from the torrent and OpenSubtitles, synced exactly to the speech (you
+  see it listening and matching), machine translated when your language is
+  missing, or written live from the audio by Whisper (AI subtitles)
+- the next episode is already loading while you watch, and the subtitles and audio
+  you picked stay for the rest of the show
 - switches to a faster source by itself when one stalls
+- profiles: everyone in the house has their own *Continue watching* and *My list*,
+  on every device
+- a Calendar of new episodes and of the day films become watchable, and a message
+  to your phone (ntfy or Telegram) when a new episode can actually be played
 - updates itself from GitHub
+
+| | |
+|---|---|
+| ![A film with its collection](images/movie.jpg) | ![A show with its episodes](images/show.jpg) |
+| A film: versions, My list, watched, its collection | A show: episodes, watched ticks, versions per episode |
+| ![Calendar](images/calendar.jpg) | ![On a phone](images/phone.jpg) |
+| Calendar: what comes out for the titles you follow | On a phone |
 
 Only use it for content you are allowed to watch.
 
@@ -94,6 +112,20 @@ Settings (gear icon) has your playback options. **Server settings** at the botto
 need the admin login - `admin` / `admin` until you change it there. All keys can be
 entered or changed there at any time.
 
+### Good to know
+
+- **Slow or metered internet:** Settings → Quality → *Data saver* picks the smallest
+  version that still looks good (often HEVC at about 1 GB per hour). In Server
+  settings you can also limit or switch off uploading and download less ahead.
+- **Phone notifications:** install the free [ntfy](https://ntfy.sh) app, subscribe
+  to a topic only you know (e.g. `novakovi-filmy-7x2`) and put
+  `https://ntfy.sh/novakovi-filmy-7x2` into Server settings → *New-episode
+  notifications*. Tap *Send a test*. A Telegram bot works too.
+- **Profiles:** the letter in the top right corner. Add one per person; each device
+  remembers who is watching.
+- **Storage:** on a Raspberry Pi, *Service status* → *Storage* shows what TorrServer
+  keeps and lets you clean up.
+
 ## API keys
 
 **TMDB** - required, free. Movie and show catalogue, posters, search.
@@ -148,6 +180,14 @@ cp .env.example .env                 # TMDB_API_KEY at least
 ./torr/TorrServer-windows-amd64.exe  # or any TorrServer on port 8090
 python app.py                        # http://127.0.0.1:5000
 python -m pytest tests
+```
+
+The tests include headless browser tests (Playwright). They are skipped until you
+install the dev tools once:
+
+```sh
+pip install -r requirements-dev.txt
+python -m playwright install chromium
 ```
 
 All server settings are in `.env` (see `.env.example`). Viewer settings (quality,
