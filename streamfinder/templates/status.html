@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ t('status_title') }} – StreamFinder{% endblock %}
+{% block content %}
+  <div class="page page-narrow">
+    <header class="page-head"><h1>{{ t('status_title') }}</h1></header>
+    <ul class="status-list">
+      <li data-ok="{{ 'yes' if torrserver_online else 'no' }}">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <strong>TorrServer</strong>
+          <p>{{ t('running') if torrserver_online else t('not_running') }} <span class="muted">{{ torrserver_url }}</span></p>
+        </div>
+      </li>
+      {% for p in providers %}
+      <li data-ok="{{ 'yes' if p.available else 'no' }}">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <strong>{{ p.name }}</strong>
+          <p>{{ t('responding') if p.available else t('not_responding') }} <span class="muted">{{ p.url }}</span></p>
+        </div>
+      </li>
+      {% endfor %}
+      <li data-ok="{{ 'yes' if imdb_ready else 'wait' }}">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <strong>{{ t('imdb_ratings') }}</strong>
+          <p>{{ t('imdb_ready', n='{:,}'.format(imdb_count).replace(',', ' ')) if imdb_ready else t('imdb_loading') }}</p>
+        </div>
+      </li>
+      <li data-ok="yes">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <strong>{{ t('subtitles') }}</strong>
+          <p>
+            {{ t('subtitle_languages', list=subtitles.language_names.values() | join(', ')) }}
+            {{ t('opensubtitles_api_on') if subtitles.opensubtitles_api else t('opensubtitles_api_off') }}
+          </p>
+        </div>
+      </li>
+    </ul>
+  </div>
+{% endblock %}

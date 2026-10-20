@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ t('error_title') }} – StreamFinder{% endblock %}
+{% block content %}
+  <div class="page page-message">
+    <h1>{{ t('error_title') }}</h1>
+    <p>{{ message }}</p>
+    <a class="btn btn-play" href="{{ url_for('web.home') }}">{{ t('back_home') }}</a>
+  </div>
+{% endblock %}

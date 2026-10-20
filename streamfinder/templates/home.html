@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import row %}
+{% block body_class %}has-hero{% endblock %}
+{% block content %}
+  {% if billboard %}
+  <section class="hero hero-billboard">
+    <img class="hero-backdrop" src="{{ billboard.backdrop }}" alt="" fetchpriority="high">
+    <div class="hero-body">
+      <h1 class="hero-title">{{ billboard.title }}</h1>
+      <p class="hero-facts">
+        {% if billboard.rating %}<span class="rating"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>{{ billboard.rating }}</span>{% endif %}
+        {% if billboard.year %}<span>{{ billboard.year }}</span>{% endif %}
+        <span>{{ t('movie') if billboard.type == 'movie' else t('show') }}</span>
+      </p>
+      <p class="hero-overview">{{ billboard.overview }}</p>
+      <div class="hero-actions">
+        <a class="btn btn-play" href="{{ billboard.url }}?play=1"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>{{ t('play') }}</a>
+        <a class="btn btn-ghost" href="{{ billboard.url }}"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>{{ t('more_info') }}</a>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="rows">
+    <section class="row" id="continue-row" hidden>
+      <h2 class="row-title">{{ t('continue_watching') }}</h2>
+      <div class="row-viewport">
+        <div class="row-track row-track-wide" id="continue-track"></div>
+      </div>
+    </section>
+    <section class="row" id="mylist-row" hidden>
+      <h2 class="row-title">{{ t('my_list') }}</h2>
+      <div class="row-viewport">
+        <div class="row-track" id="mylist-track"></div>
+      </div>
+    </section>
+    {% for r in rows %}
+      {{ row(r.title, r['items'], r.key) }}
+    {% endfor %}
+  </div>
+{% endblock %}

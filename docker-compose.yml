@@ -1,0 +1,40 @@
+# StreamFinder + TorrServer (works on Raspberry Pi 4/5 arm64, armv7 and x86-64).
+#
+#   cp .env.example .env   # fill in TMDB_API_KEY (+ OPENSUBTITLES_API_KEY for online subtitles)
+#   docker compose up -d --build
+#
+# App:        http://<host>:5000
+# TorrServer: http://<host>:8090
+#
+# Both services use host networking: BitTorrent needs incoming peer connections for good
+# speeds, and the browser streams straight from TorrServer on port 8090.
+
+services:
+  torrserver:
+    image: ghcr.io/yourok/torrserver:${TORRSERVER_TAG:-MatriX.147}
+    container_name: torrserver
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - TS_PORT=8090
+      - TS_DONTKILL=1
+      - TS_CONF_PATH=/opt/ts/config
+      - TS_TORR_DIR=/opt/ts/torrents
+    volumes:
+      - ./data/torrserver/config:/opt/ts/config
+      - ./data/torrserver/torrents:/opt/ts/torrents
+
+  app:
+    build: .
+    image: streamfinder:latest
+    container_name: streamfinder
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TORRSERVER_URL=http://127.0.0.1:8090
+      - SUBTITLE_CACHE_DIR=/app/cache/subtitles
+    volumes:
+      - ./data/cache:/app/cache
+    depends_on:
+      - torrserver

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}StreamFinder{% endblock %}</title>
+  <meta name="theme-color" content="#141414">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e5383b'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://image.tmdb.org">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+  <script id="i18n" type="application/json">{{ js_strings() | tojson }}</script>
+  <script id="defaults" type="application/json">{{ {'subtitles': subtitle_defaults, 'lang': lang} | tojson }}</script>
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% include '_icons.html' %}
+  <a class="skip-link" href="#main">{{ t('skip') }}</a>
+
+  <header class="nav" id="nav">
+    <a class="nav-logo" href="{{ url_for('web.home') }}" aria-label="StreamFinder">StreamFinder</a>
+    <nav class="nav-links" aria-label="{{ t('nav_main') }}">
+      {% set endpoint = request.endpoint or '' %}
+      <a href="{{ url_for('web.home') }}" {% if endpoint == 'web.home' %}aria-current="page"{% endif %}>{{ t('nav_home') }}</a>
+      <a href="{{ url_for('web.movies') }}" {% if endpoint == 'web.movies' %}aria-current="page"{% endif %}>{{ t('nav_movies') }}</a>
+      <a href="{{ url_for('web.shows') }}" {% if endpoint == 'web.shows' %}aria-current="page"{% endif %}>{{ t('nav_shows') }}</a>
+    </nav>
+    <form class="nav-search" action="{{ url_for('web.search') }}" role="search">
+      <label class="sr-only" for="nav-search-input">{{ t('search_label') }}</label>
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="nav-search-input" name="q" type="search" placeholder="{{ t('search_placeholder') }}" value="{{ q or '' }}" autocomplete="off" enterkeyhint="search">
+    </form>
+    <div class="nav-lang" role="group" aria-label="{{ t('language') }}">
+      {% for code in ui_languages %}
+        <a href="{{ url_for('web.set_language', code=code, next=request.full_path) }}" {% if code == lang %}aria-current="true"{% endif %} lang="{{ code }}">{{ code | upper }}</a>
+      {% endfor %}
+    </div>
+    <a class="nav-icon" href="{{ url_for('web.settings') }}" title="{{ t('nav_settings') }}" aria-label="{{ t('nav_settings') }}" {% if request.endpoint == 'web.settings' %}aria-current="page"{% endif %}>
+      <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
+    </a>
+    <a class="nav-status" id="torrserver-status" href="{{ url_for('web.status') }}" title="{{ t('status_title') }}" data-state="unknown">
+      <span class="dot" aria-hidden="true"></span><span class="nav-status-label">TorrServer</span>
+    </a>
+  </header>
+
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>{{ t('footer_data', tmdb='<a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>') | safe }}</p>
+    <a href="{{ url_for('web.status') }}">{{ t('status_title') }}</a>
+  </footer>
+
+  <nav class="tabbar" aria-label="{{ t('nav_main') }}">
+    {% for ep, label, ic in [('web.home', 'nav_home', 'home'), ('web.movies', 'nav_movies', 'film'), ('web.shows', 'nav_shows', 'tv'), ('web.search', 'nav_search', 'search'), ('web.settings', 'nav_settings', 'settings')] %}
+      <a href="{{ url_for(ep) }}" {% if request.endpoint == ep %}aria-current="page"{% endif %}>
+        <svg class="icon" aria-hidden="true"><use href="#i-{{ ic }}"/></svg><span>{{ t(label) }}</span>
+      </a>
+    {% endfor %}
+  </nav>
+
+  {% block overlays %}{% endblock %}
+  <script src="{{ asset('js/app.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

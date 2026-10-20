@@ -1,0 +1,26 @@
+{% macro poster(item, eager=false) -%}
+<a class="poster" href="{{ item.url }}" data-id="{{ item.id }}" data-type="{{ item.type }}">
+  <img src="{{ item.poster }}" alt="" {% if not eager %}loading="lazy"{% endif %} decoding="async" width="342" height="513">
+  {% if item.imdb %}<span class="poster-badge" title="IMDb">IMDb {{ item.imdb }}</span>{% endif %}
+  <span class="poster-meta">
+    <span class="poster-title">{{ item.title }}</span>
+    <span class="poster-sub">
+      {%- if item.year %}<span>{{ item.year }}</span>{% endif -%}
+      {%- if item.rating %}<span class="rating"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>{{ item.rating }}</span>{% endif -%}
+    </span>
+  </span>
+</a>
+{%- endmacro %}
+
+{% macro row(title, items, key='') -%}
+<section class="row" {% if key %}data-row="{{ key }}"{% endif %}>
+  <h2 class="row-title">{{ title }}</h2>
+  <div class="row-viewport">
+    <button class="row-arrow prev" type="button" aria-label="{{ t('scroll_back') }}" hidden><svg class="icon"><use href="#i-back"/></svg></button>
+    <div class="row-track">
+      {% for item in items %}{{ poster(item) }}{% endfor %}
+    </div>
+    <button class="row-arrow next" type="button" aria-label="{{ t('scroll_forward') }}"><svg class="icon"><use href="#i-next"/></svg></button>
+  </div>
+</section>
+{%- endmacro %}

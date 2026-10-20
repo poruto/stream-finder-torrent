@@ -1,0 +1,141 @@
+<div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="{{ t('player') }}">
+  <video id="video" playsinline preload="auto"></video>
+  <div class="player-buffering" id="player-buffering" hidden><div class="spinner" aria-hidden="true"></div></div>
+
+  <div class="player-top">
+    <button class="icon-btn" id="player-close" type="button" aria-label="{{ t('close_player') }}">
+      <svg class="icon"><use href="#i-back"/></svg>
+    </button>
+    <div class="player-heading">
+      <strong id="player-title"></strong>
+      <span id="player-subtitle"></span>
+    </div>
+  </div>
+
+  <div class="player-controls" id="player-controls">
+    <div class="seek" id="seek" role="slider" tabindex="0" aria-label="{{ t('seek') }}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+      <div class="seek-track">
+        <div class="seek-buffered" id="seek-buffered"></div>
+        <div class="seek-played" id="seek-played"></div>
+        <div class="seek-thumb" id="seek-thumb"></div>
+      </div>
+      <output class="seek-tooltip" id="seek-tooltip" hidden></output>
+    </div>
+    <div class="controls-row">
+      <button class="ctl" id="ctl-play" type="button" aria-label="{{ t('play_pause') }}">
+        <svg class="icon icon-play"><use href="#i-play"/></svg><svg class="icon icon-pause"><use href="#i-pause"/></svg>
+      </button>
+      <button class="ctl" id="ctl-back" type="button" aria-label="{{ t('rewind') }}"><svg class="icon"><use href="#i-rewind"/></svg></button>
+      <button class="ctl" id="ctl-forward" type="button" aria-label="{{ t('forward') }}"><svg class="icon"><use href="#i-forward"/></svg></button>
+      <div class="volume">
+        <button class="ctl" id="ctl-mute" type="button" aria-label="{{ t('mute') }}">
+          <svg class="icon icon-volume"><use href="#i-volume"/></svg><svg class="icon icon-muted"><use href="#i-muted"/></svg>
+        </button>
+        <input type="range" id="ctl-volume" min="0" max="1" step="0.05" value="1" aria-label="{{ t('volume') }}">
+      </div>
+      <span class="time" id="ctl-time">0:00 / 0:00</span>
+      <span class="player-stats" id="player-stats"></span>
+      <span class="spacer"></span>
+      <button class="ctl ctl-text" id="episodes-btn" type="button" hidden aria-haspopup="true" aria-expanded="false">
+        <svg class="icon"><use href="#i-list"/></svg><span>{{ t('episodes') }}</span>
+      </button>
+      <button class="ctl ctl-text" id="subs-btn" type="button" aria-haspopup="true" aria-expanded="false" disabled>
+        <svg class="icon"><use href="#i-cc"/></svg><span id="subs-label">{{ t('subtitles') }}</span>
+      </button>
+      <button class="ctl ctl-text" id="player-versions" type="button">
+        <svg class="icon"><use href="#i-layers"/></svg><span>{{ t('other_version') }}</span>
+      </button>
+      <button class="ctl ctl-text" id="next-btn" type="button" hidden>
+        <span>{{ t('next_episode') }}</span><svg class="icon"><use href="#i-next"/></svg>
+      </button>
+      <button class="ctl" id="ctl-cast" type="button" hidden aria-label="{{ t('cast_to_tv') }}" title="{{ t('cast_to_tv') }}"><svg class="icon"><use href="#i-cast"/></svg></button>
+      <button class="ctl" id="ctl-pip" type="button" hidden aria-label="{{ t('pip') }}" title="{{ t('pip') }}"><svg class="icon"><use href="#i-pip"/></svg></button>
+      <button class="ctl" id="ctl-fullscreen" type="button" aria-label="{{ t('fullscreen') }}" title="{{ t('fullscreen') }}"><svg class="icon"><use href="#i-fullscreen"/></svg></button>
+    </div>
+  </div>
+
+  <div class="player-menu subs-menu" id="subs-menu" hidden>
+    <div class="subs-options" id="subs-options"></div>
+    <div class="subs-sync">
+      <span>{{ t('sync') }}</span>
+      <button class="tool-btn" type="button" data-sync="-0.5" aria-label="{{ t('sync_earlier') }}">−0,5 s</button>
+      <output id="sync-value">0,0 s</output>
+      <button class="tool-btn" type="button" data-sync="0.5" aria-label="{{ t('sync_later') }}">+0,5 s</button>
+    </div>
+    <p class="muted subs-help">{{ t('sync_help') }}</p>
+  </div>
+
+  <div class="player-menu episodes-menu" id="episodes-menu" hidden>
+    <div class="episodes-menu-head">
+      <label class="sr-only" for="player-season">{{ t('season') }}</label>
+      <select id="player-season"></select>
+    </div>
+    <ol class="episodes-menu-list" id="episodes-menu-list"></ol>
+    <label class="player-file" id="player-file" hidden>
+      <span>{{ t('file') }}</span>
+      <select id="file-select"></select>
+    </label>
+  </div>
+
+  <div class="player-loading" id="player-loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <ol class="steps">
+      <li data-step="search">{{ t('step_search') }}</li>
+      <li data-step="connect">{{ t('step_connect') }}</li>
+      <li data-step="buffer">{{ t('step_buffer') }}</li>
+    </ol>
+    <p class="loading-detail" id="loading-detail"></p>
+  </div>
+
+  <div class="player-message" id="player-message" hidden>
+    <svg class="icon icon-lg" aria-hidden="true"><use href="#i-alert"/></svg>
+    <h2 id="message-title"></h2>
+    <p id="message-text"></p>
+    <div class="message-actions" id="message-actions"></div>
+  </div>
+
+  <div class="player-toast" id="player-toast" role="status" hidden></div>
+</div>
+
+<div class="sheet" id="versions" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+    <header class="sheet-head">
+      <div>
+        <h2 id="versions-title">{{ t('choose_version') }}</h2>
+        <p class="muted" id="versions-context"></p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="{{ t('close') }}"><svg class="icon"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-body">
+      <label class="sheet-quality">
+        {{ t('preferred_quality') }}
+        <select id="sheet-quality">
+          {% for value in ['auto', '1080', '2160', '720'] %}<option value="{{ value }}">{{ t('quality_' ~ value) }}</option>{% endfor %}
+        </select>
+      </label>
+      <div id="versions-status" class="versions-status"></div>
+      <div class="picks" id="versions-picks"></div>
+      <div class="chips chips-small" id="versions-filters" hidden></div>
+      <ul class="version-list" id="versions-list"></ul>
+      <details class="versions-low" id="versions-low" hidden>
+        <summary></summary>
+        <p class="muted">{{ t('low_note') }}</p>
+        <ul class="version-list"></ul>
+      </details>
+      <details class="versions-advanced">
+        <summary>{{ t('advanced') }}</summary>
+        <form class="inline-form" id="manual-search">
+          <label class="sr-only" for="manual-query">{{ t('custom_label') }}</label>
+          <input id="manual-query" type="search" placeholder="{{ t('custom_placeholder') }}">
+          <button class="btn btn-ghost" type="submit">{{ t('search_button') }}</button>
+        </form>
+        <form class="inline-form" id="magnet-form">
+          <label class="sr-only" for="magnet-input">{{ t('magnet_label') }}</label>
+          <input id="magnet-input" type="text" placeholder="magnet:?xt=urn:btih:…" autocomplete="off">
+          <button class="btn btn-ghost" type="submit">{{ t('play') }}</button>
+        </form>
+      </details>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_macros.html" import poster %}
+{% block title %}{% if q %}{{ q }} – {% endif %}{{ t('search_title') }} – StreamFinder{% endblock %}
+{% block body_class %}is-search{% endblock %}
+{% block content %}
+  <div class="page">
+    <header class="page-head">
+      <h1 id="search-heading" data-template="{{ t('results_for', q='{q}') }}" data-empty="{{ t('search_title') }}">{% if q %}{{ t('results_for', q=q) }}{% else %}{{ t('search_title') }}{% endif %}</h1>
+      <div class="chips chips-inline" id="search-kind" role="group">
+        {% for value, label in [('', 'all'), ('movie', 'filter_movies'), ('tv', 'filter_shows')] %}
+          <button class="chip" type="button" data-kind="{{ value }}" aria-pressed="{{ 'true' if (kind or '') == value else 'false' }}">{{ t(label) }}</button>
+        {% endfor %}
+      </div>
+    </header>
+    <div class="grid" id="search-grid">
+      {% for item in items %}{{ poster(item, eager=loop.index <= 12) }}{% endfor %}
+    </div>
+    <p class="empty" id="search-empty" data-template="{{ t('no_results', q='{q}') }}" {% if items or not q %}hidden{% endif %}>{{ t('no_results', q=q) }}</p>
+    <p class="empty" id="search-hint" {% if q %}hidden{% endif %}>{{ t('search_hint') }}</p>
+  </div>
+{% endblock %}

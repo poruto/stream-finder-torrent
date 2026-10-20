@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_macros.html" import poster %}
+{% set heading = t('nav_movies') if media_type == 'movie' else t('nav_shows') %}
+{% set active_filters = [filters.genre, filters.imdb, filters.decade, filters.lang] | select | list | length %}
+{% block title %}{{ heading }} – StreamFinder{% endblock %}
+{% block content %}
+  <div class="page browse">
+    <header class="browse-head">
+      <h1>{{ heading }}</h1>
+      <form class="browse-search" action="{{ url_for('web.search') }}" role="search">
+        <input type="hidden" name="type" value="{{ media_type }}">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="sr-only" for="browse-search-input">{{ t('search_movies') if media_type == 'movie' else t('search_shows') }}</label>
+        <input id="browse-search-input" name="q" type="search" placeholder="{{ t('search_movies') if media_type == 'movie' else t('search_shows') }}" autocomplete="off" enterkeyhint="search">
+      </form>
+    </header>
+
+    <form class="filter-bar" method="get" id="filter-bar">
+      {% if filters.genre %}<input type="hidden" name="genre" value="{{ filters.genre }}">{% endif %}
+      <label class="filter-pill">
+        <span>{{ t('sort') }}</span>
+        <select name="sort">
+          {% for key in sorts %}<option value="{{ key }}" {% if key == filters.sort %}selected{% endif %}>{{ t('sort_' ~ key) }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="filter-pill {% if filters.decade %}is-active{% endif %}">
+        <span>{{ t('decade') }}</span>
+        <select name="decade">
+          <option value="">{{ t('decade_any') }}</option>
+          {% for d in decades %}
+            <option value="{{ d }}" {% if d == filters.decade %}selected{% endif %}>{{ t('decade_older') if d == 'older' else t('decade_n', n=d, m=(d | int) + 9) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="filter-pill {% if filters.lang %}is-active{% endif %}">
+        <span>{{ t('orig_language') }}</span>
+        <select name="lang">
+          <option value="">{{ t('lang_any') }}</option>
+          {% for code in languages %}<option value="{{ code }}" {% if code == filters.lang %}selected{% endif %}>{{ t('lang_' ~ code) }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if imdb_ready %}
+      <label class="filter-pill {% if filters.imdb %}is-active{% endif %}">
+        <span>IMDb</span>
+        <select name="imdb">
+          <option value="">{{ t('imdb_any') }}</option>
+          {% for n in imdb_filters %}<option value="{{ n }}" {% if filters.imdb == n %}selected{% endif %}>{{ t('imdb_min', n=n) }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      {% if active_filters %}
+        <a class="filter-clear" href="{{ url_for(request.endpoint, sort=filters.sort) }}">{{ t('clear_filters') }}</a>
+      {% endif %}
+      <noscript><button class="btn btn-ghost" type="submit">OK</button></noscript>
+    </form>
+
+    <nav class="chips chips-scroll" aria-label="{{ t('genres') }}">
+      {% set base_args = {'sort': filters.sort, 'imdb': filters.imdb, 'decade': filters.decade, 'lang': filters.lang} %}
+      <a class="chip" href="{{ url_for(request.endpoint, **base_args) }}" {% if not filters.genre %}aria-current="true"{% endif %}>{{ t('all') }}</a>
+      {% for g in genres %}
+        <a class="chip" href="{{ url_for(request.endpoint, genre=g.id, **base_args) }}" {% if filters.genre == g.id %}aria-current="true"{% endif %}>{{ g.name }}</a>
+      {% endfor %}
+    </nav>
+
+    <div class="grid" id="browse-grid"
+         data-type="{{ media_type }}" data-genre="{{ filters.genre or '' }}" data-sort="{{ filters.sort }}"
+         data-imdb="{{ filters.imdb or '' }}" data-decade="{{ filters.decade or '' }}" data-lang="{{ filters.lang or '' }}"
+         data-next="{{ next_page or '' }}">
+      {% for item in items %}{{ poster(item, eager=loop.index <= 12) }}{% endfor %}
+    </div>
+    {% if not items %}
+      <div class="empty-state">
+        <p>{{ t('empty_browse') }}</p>
+        {% if active_filters %}<a class="btn btn-ghost" href="{{ url_for(request.endpoint) }}">{{ t('clear_filters') }}</a>{% endif %}
+      </div>
+    {% endif %}
+    {% if next_page %}
+      <div class="load-more" id="load-more-wrap"><button class="btn btn-ghost" id="load-more" type="button">{{ t('load_more') }}</button></div>
+    {% endif %}
+  </div>
+{% endblock %}

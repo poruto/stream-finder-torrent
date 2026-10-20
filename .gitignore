@@ -1,5 +1,11 @@
-*.env
 .env
-./.env
-*.idea*
-/.idea
+.idea/
+__pycache__/
+*.pyc
+.pytest_cache/
+cache/
+data/
+torr/config.db
+torr/viewed.json
+.playwright-mcp/
+.ruff_cache/

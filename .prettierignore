@@ -1,0 +1,2 @@
+# Jinja templates: Prettier does not understand {% %} blocks and breaks them
+streamfinder/templates/

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_macros.html" import row %}
+{% block title %}{{ title }}{% if year %} ({{ year }}){% endif %} – StreamFinder{% endblock %}
+{% block body_class %}has-hero{% endblock %}
+{% block content %}
+  <section class="hero hero-detail">
+    {% if backdrop %}<img class="hero-backdrop" src="{{ backdrop }}" alt="" fetchpriority="high">{% endif %}
+    <div class="hero-body">
+      <h1 class="hero-title">{{ title }}</h1>
+      <p class="hero-facts">
+        {% if imdb_rating %}<a class="imdb-badge" href="{{ imdb_url }}" target="_blank" rel="noopener" title="{{ '{:,}'.format(imdb_votes).replace(',', ' ') }} votes">IMDb <strong>{{ imdb_rating }}</strong></a>
+        {% elif rating %}<span class="rating"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>{{ rating }}</span>{% endif %}
+        {% if year %}<span>{{ year }}</span>{% endif %}
+        {% if runtime_label %}<span>{{ runtime_label }}</span>{% endif %}
+        {% if seasons_label %}<span>{{ seasons_label }}</span>{% endif %}
+        {% for g in genres %}<span>{{ g }}</span>{% endfor %}
+      </p>
+      {% if overview %}<p class="hero-overview">{{ overview }}</p>{% endif %}
+      <div class="hero-actions">
+        <button class="btn btn-play" id="play-btn" type="button" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span id="play-label">{{ t('play') }}</span>
+        </button>
+        <button class="btn btn-ghost" id="restart-btn" type="button" hidden>{{ t('start_over') }}</button>
+        {% if media_type == 'movie' %}
+          <button class="btn btn-ghost" id="versions-btn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>{{ t('other_versions') }}</button>
+        {% endif %}
+        <button class="btn btn-ghost btn-icon" id="list-btn" type="button" aria-pressed="false" title="{{ t('add_to_list') }}">
+          <svg class="icon icon-add" aria-hidden="true"><use href="#i-plus"/></svg><svg class="icon icon-added" aria-hidden="true"><use href="#i-check"/></svg>
+          <span id="list-label">{{ t('add_to_list') }}</span>
+        </button>
+        {% if trailer %}
+          <a class="btn btn-ghost btn-icon" href="{{ trailer }}" target="_blank" rel="noopener" title="{{ t('trailer') }}"><svg class="icon" aria-hidden="true"><use href="#i-film"/></svg><span>{{ t('trailer') }}</span></a>
+        {% endif %}
+      </div>
+      <p class="play-hint" id="play-hint" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <div class="detail-content">
+    {% if media_type == 'tv' %}
+    <section class="episodes" id="episodes">
+      <header class="episodes-head">
+        <h2>{{ t('episodes') }}</h2>
+        {% if seasons | length > 1 %}
+          <label class="sr-only" for="season-select">{{ t('season') }}</label>
+          <select id="season-select">
+            {% for s in seasons %}
+              <option value="{{ s.number }}" {% if s.number == current_season %}selected{% endif %}>{{ t('season_option', name=s.name, n=s.episodes) }}</option>
+            {% endfor %}
+          </select>
+        {% elif seasons %}
+          <span class="muted">{{ seasons[0].name }}</span>
+        {% endif %}
+      </header>
+      <ol class="episode-list" id="episode-list"></ol>
+    </section>
+    {% endif %}
+
+    {% if cast %}
+    <section class="cast">
+      <h2 class="row-title">{{ t('cast') }}</h2>
+      <ul class="cast-list">
+        {% for c in cast %}
+          <li>
+            {% if c.photo %}<img src="{{ c.photo }}" alt="" loading="lazy" width="185" height="278">{% else %}<span class="cast-blank" aria-hidden="true">{{ c.name[:1] }}</span>{% endif %}
+            <strong>{{ c.name }}</strong>
+            {% if c.character %}<span>{{ c.character }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if similar %}{{ row(t('similar'), similar) }}{% endif %}
+
+    <section class="about">
+      {% if original_title %}<p><span class="muted">{{ t('original_title') }}</span> {{ original_title }}</p>{% endif %}
+      {% if tagline %}<p class="muted">„{{ tagline }}“</p>{% endif %}
+      <p class="about-links">
+        {% if imdb_url %}<a href="{{ imdb_url }}" target="_blank" rel="noopener">IMDb <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>{% endif %}
+        <a href="{{ csfd_url }}" target="_blank" rel="noopener">{{ t('csfd_search') }} <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+      </p>
+    </section>
+  </div>
+{% endblock %}
+
+{% block overlays %}
+  <script id="player-context" type="application/json">{{ player | tojson }}</script>
+  {% include '_player.html' %}
+{% endblock %}
+{% block scripts %}
+  <script src="{{ asset('js/player.js') }}" defer></script>
+{% endblock %}
