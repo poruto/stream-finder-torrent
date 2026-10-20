@@ -123,6 +123,17 @@ def is_released(data: dict[str, Any]) -> bool:
     return data.get("status") in ("Released", "Returning Series", "Ended", "Canceled")
 
 
+# Widths offered for the big hero backdrops; "original" is at least Full HD on TMDB.
+_BACKDROP_WIDTHS = (("w780", 780), ("w1280", 1280), ("original", 1920))
+
+
+def backdrop_srcset(path: str | None) -> str | None:
+    """`srcset` for a hero backdrop, so phones don't download the original (often 4K) file."""
+    if not path:
+        return None
+    return ", ".join(f"{image_url(path, size)} {width}w" for size, width in _BACKDROP_WIDTHS)
+
+
 def card(
     result: dict[str, Any], media_type: str | None = None
 ) -> dict[str, Any] | None:
@@ -297,6 +308,7 @@ def home():
                 **card(result),
                 "overview": result["overview"],
                 "backdrop": image_url(result["backdrop_path"], "original"),
+                "backdrop_srcset": backdrop_srcset(result["backdrop_path"]),
             }
             break
     return render_template("home.html", billboard=billboard, rows=rows)
@@ -362,6 +374,7 @@ def _detail_context(media_type: str, tmdb_id: int) -> dict[str, Any]:
         "genres": [g["name"] for g in data.get("genres", [])][:3],
         "poster": image_url(data.get("poster_path"), "w500"),
         "backdrop": image_url(data.get("backdrop_path"), "original"),
+        "backdrop_srcset": backdrop_srcset(data.get("backdrop_path")),
         "trailer": trailer_url(data),
         "imdb_url": f"https://www.imdb.com/title/{data['imdb_id']}/"
         if data.get("imdb_id")

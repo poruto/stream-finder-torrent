@@ -4,7 +4,7 @@
 {% block body_class %}has-hero{% endblock %}
 {% block content %}
   <section class="hero hero-detail">
-    {% if backdrop %}<img class="hero-backdrop" src="{{ backdrop }}" alt="" fetchpriority="high">{% endif %}
+    {% if backdrop %}<img class="hero-backdrop" src="{{ backdrop }}" {% if backdrop_srcset %}srcset="{{ backdrop_srcset }}" sizes="100vw"{% endif %} alt="" fetchpriority="high">{% endif %}
     <div class="hero-body">
       <h1 class="hero-title">{{ title }}</h1>
       <p class="hero-facts">

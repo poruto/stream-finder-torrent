@@ -58,14 +58,16 @@
     return svg;
   };
 
-  SF.api = async (url, body) => {
+  // `signal`: an AbortController's signal, to drop a request nobody waits for any more.
+  SF.api = async (url, body, { signal } = {}) => {
     const options =
       body === undefined
-        ? {}
+        ? { signal }
         : {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
+            signal,
           };
     const response = await fetch(url, options);
     let data;
@@ -460,16 +462,37 @@
   }, 30000);
 
   // ---------------------------------------------------------- carousels
+  // Arrow visibility of the carousels is measured for all of them first and then applied,
+  // once per frame, so scrolling and resizing don't force a layout per row.
+  const carousels = new Set();
+  const dirtyCarousels = new Set();
+  let carouselFrame = 0;
+  const flushCarousels = () => {
+    carouselFrame = 0;
+    const measured = [...dirtyCarousels].map(({ track, prev, next }) => [
+      prev,
+      next,
+      track.scrollLeft < 8,
+      track.scrollLeft + track.clientWidth >= track.scrollWidth - 8,
+    ]);
+    dirtyCarousels.clear();
+    for (const [prev, next, atStart, atEnd] of measured) {
+      prev.hidden = atStart;
+      next.hidden = atEnd;
+    }
+  };
+  const queueCarousel = (row) => {
+    dirtyCarousels.add(row);
+    carouselFrame ||= requestAnimationFrame(flushCarousels);
+  };
+  window.addEventListener("resize", () => carousels.forEach(queueCarousel));
+
   SF.initRow = (viewport) => {
     const track = viewport.querySelector(".row-track");
     const prev = viewport.querySelector(".row-arrow.prev");
     const next = viewport.querySelector(".row-arrow.next");
     if (!track || !prev || !next) return;
-    const update = () => {
-      prev.hidden = track.scrollLeft < 8;
-      next.hidden =
-        track.scrollLeft + track.clientWidth >= track.scrollWidth - 8;
-    };
+    const row = { track, prev, next };
     const page = (dir) =>
       track.scrollBy({
         left: dir * track.clientWidth * 0.85,
@@ -477,9 +500,11 @@
       });
     prev.addEventListener("click", () => page(-1));
     next.addEventListener("click", () => page(1));
-    track.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
-    update();
+    track.addEventListener("scroll", () => queueCarousel(row), {
+      passive: true,
+    });
+    carousels.add(row);
+    queueCarousel(row);
   };
   document.querySelectorAll(".row-viewport").forEach(SF.initRow);
 
@@ -743,18 +768,28 @@
       });
       loadMore.disabled = true;
       loadMore.textContent = t("loading");
+      let loaded = false;
       try {
         const data = await SF.api(`/api/browse?${params}`);
         browseGrid.append(...data.items.map(SF.poster));
         browseGrid.dataset.next = data.next_page || "";
         loadMore.hidden = !data.next_page;
         loadMore.textContent = t("load_more");
+        loaded = true;
       } catch {
         loadMore.textContent = t("load_failed");
       } finally {
         loadMore.disabled = false;
         loading = false;
       }
+      // Tall screens (TVs): the button can still be in reach after a page, and the
+      // observer only fires when that changes, so keep going here.
+      if (
+        loaded &&
+        !loadMore.hidden &&
+        loadMore.getBoundingClientRect().top < window.innerHeight + 800
+      )
+        fetchMore();
     };
     loadMore.addEventListener("click", fetchMore);
     // Load the next page automatically shortly before the end of the grid.

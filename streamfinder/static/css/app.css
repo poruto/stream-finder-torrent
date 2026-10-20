@@ -1257,6 +1257,16 @@ select option:checked {
 .player:fullscreen {
   height: 100%;
 }
+/* The player and the versions panel take the focus when they open (for the keyboard and
+   TV remotes); the containers themselves need no ring. */
+.player:focus,
+.sheet-panel:focus {
+  outline: none;
+}
+.season-failed {
+  list-style: none;
+  padding: 16px 0;
+}
 .player video {
   position: absolute;
   inset: 0;
@@ -2786,4 +2796,28 @@ select option:checked {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ============================================================== version */
+
+.nav-version {
+  flex: none;
+  margin-left: calc(-1 * clamp(8px, 2vw, 26px)); /* sits next to the logo, not a nav gap away */
+  align-self: center;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: var(--text-3);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav-version:hover,
+.nav-version:focus-visible {
+  color: var(--text-2);
+}
+.footer-credit {
+  font-variant-numeric: tabular-nums;
 }

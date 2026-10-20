@@ -1,4 +1,4 @@
-<div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="{{ t('player') }}">
+<div class="player" id="player" hidden role="dialog" aria-modal="true" aria-label="{{ t('player') }}" tabindex="-1">
   <video id="video" playsinline preload="auto"></video>
   <div class="player-buffering" id="player-buffering" hidden><div class="spinner" aria-hidden="true"></div></div>
 
@@ -112,7 +112,7 @@
 
 <div class="sheet" id="versions" hidden>
   <div class="sheet-backdrop" data-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="versions-title" tabindex="-1">
     <header class="sheet-head">
       <div>
         <h2 id="versions-title">{{ t('choose_version') }}</h2>

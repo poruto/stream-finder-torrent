@@ -27,6 +27,8 @@
   const MAX_SWITCHES = 2;
   const GOOD_SPEED = 300 * 1024; // bytes/s that count as "it is downloading"
   const PREFETCH_AT = 0.85; // start looking for the next episode's versions
+  const STALL_END_MARGIN = 30; // seconds: a converted stream ending earlier than this broke off
+  const HEAL_RETRIES = 2; // restarts at the same spot before another version is tried
 
   const state = {
     episodes: ctx.episodes || [],
@@ -42,6 +44,13 @@
     switching: false,
     prefetched: false,
     timers: {},
+    // Bumped by every play() and by closing the player: older async work sees it and stops.
+    playGen: 0,
+    playAbort: null, // AbortController of the pending /api/play
+    subRequest: null, // AbortController of the subtitle download in progress
+    convertSeq: 0, // latest startConverted() call; older ones give up
+    skipTarget: null, // converted streams: where quick repeated skips are heading
+    countdown: false, // the "next episode in N s" countdown is running
   };
 
   const clearTimer = (name) => clearTimeout(state.timers[name]);
@@ -285,8 +294,8 @@
 
   // ============================================================= episodes (page list + player menu)
 
-  function episodeProgress(ep) {
-    const saved = progress.get(progressKey) || {};
+  // `saved`: the stored progress, read once by callers rendering a whole list.
+  function episodeProgress(ep, saved = progress.get(progressKey) || {}) {
     return (saved.episodes || {})[`${ep.season}x${ep.episode}`];
   }
 
@@ -301,10 +310,11 @@
   function renderEpisodes() {
     const list = $("episode-list");
     if (!list) return;
+    const saved = progress.get(progressKey) || {};
     list.replaceChildren(
       ...state.episodes.map((ep) => {
         const target = episodeTarget(ep);
-        const p = episodeProgress(ep);
+        const p = episodeProgress(ep, saved);
         const aired = isAired(ep.air_date);
         const more = el(
           "button",
@@ -380,20 +390,36 @@
     );
   }
 
+  // The episodes of `season`, or null when a newer pick overtook this one.
+  let seasonSeq = 0;
   async function loadSeason(season) {
+    const seq = ++seasonSeq;
     const data = await api(`/api/season/${ctx.tmdb_id}/${season}`);
+    if (seq !== seasonSeq) return null;
     state.season = season;
     state.episodes = data.episodes;
     return data.episodes;
+  }
+
+  // A season that didn't load: one button in place of the list that tries again.
+  function seasonFailed(list, select) {
+    const retry = el("button", { type: "button", className: "btn btn-ghost" }, [t("load_failed")]);
+    retry.addEventListener("click", (event) => {
+      event.stopPropagation();
+      select.dispatchEvent(new Event("change"));
+    });
+    list.replaceChildren(el("li", { className: "season-failed" }, [retry]));
   }
 
   $("season-select")?.addEventListener("change", async (event) => {
     const list = $("episode-list");
     list.setAttribute("aria-busy", "true");
     try {
-      await loadSeason(Number(event.target.value));
+      if (!(await loadSeason(Number(event.target.value)))) return;
       renderEpisodes();
       history.replaceState(null, "", `${detailUrl}?season=${state.season}`);
+    } catch {
+      seasonFailed(list, event.target);
     } finally {
       list.removeAttribute("aria-busy");
     }
@@ -457,7 +483,12 @@
       ),
     );
     playerSeason.addEventListener("change", async () => {
-      await loadSeason(Number(playerSeason.value));
+      try {
+        if (!(await loadSeason(Number(playerSeason.value)))) return;
+      } catch {
+        seasonFailed($("episodes-menu-list"), playerSeason);
+        return;
+      }
       renderPlayerEpisodes();
       renderEpisodes();
     });
@@ -465,6 +496,7 @@
 
   function renderPlayerEpisodes() {
     const current = state.current?.target;
+    const saved = progress.get(progressKey) || {};
     playerSeason.value = String(state.season);
     $("episodes-menu-list").replaceChildren(
       ...state.episodes.map((ep) => {
@@ -473,7 +505,7 @@
           current &&
           current.season === ep.season &&
           current.episode === ep.episode;
-        const p = episodeProgress(ep);
+        const p = episodeProgress(ep, saved);
         const button = el(
           "button",
           {
@@ -516,13 +548,73 @@
 
   // ============================================================= player shell
 
+  // While the player or the versions sheet is open, everything behind it is inert (no Tab
+  // or TV-remote focus there, Space doesn't press a hidden button), and on close focus
+  // goes back where it was.
+  const layers = []; // [{ node, returnFocus }], the topmost last
+
+  function updateInert() {
+    const top = layers.length ? layers[layers.length - 1].node : null;
+    for (const node of document.body.children) node.inert = Boolean(top) && node !== top;
+  }
+  function openLayer(node, focusNode = node) {
+    if (layers.some((layer) => layer.node === node)) return;
+    layers.push({ node, returnFocus: document.activeElement });
+    updateInert();
+    focusNode.focus({ preventScroll: true });
+  }
+  function closeLayer(node) {
+    const index = layers.findIndex((layer) => layer.node === node);
+    if (index < 0) return;
+    const [{ returnFocus }] = layers.splice(index, 1);
+    updateInert();
+    if (returnFocus?.isConnected && !returnFocus.closest("[inert]")) returnFocus.focus({ preventScroll: true });
+  }
+
+  // Lock screen, headset and TV-remote media keys.
+  const media = "mediaSession" in navigator ? navigator.mediaSession : null;
+  function setMediaAction(action, handler) {
+    try {
+      media?.setActionHandler(action, handler);
+    } catch {
+      /* action not supported by this browser */
+    }
+  }
+  function setMediaSession(target) {
+    if (!media || typeof MediaMetadata === "undefined") return;
+    media.metadata = new MediaMetadata({
+      title: hasSeason(target) ? `${ctx.title} ${shortLabel(target)}` : ctx.title,
+      artist: target.name || "",
+      artwork: ctx.poster ? [{ src: ctx.poster }] : [],
+    });
+  }
+  // Positions as the user sees them (a converted stream's own clock starts at its offset).
+  function updatePositionState() {
+    if (!media?.setPositionState || !dur()) return;
+    try {
+      media.setPositionState({
+        duration: dur(),
+        position: Math.min(Math.max(0, pos()), dur()),
+        playbackRate: video.playbackRate || 1,
+      });
+    } catch {
+      /* best effort */
+    }
+  }
+
   function openPlayer(target) {
     $("player-title").textContent = ctx.title;
     $("player-subtitle").textContent = hasSeason(target)
       ? `${t("season_episode", { s: target.season, e: target.episode })}${target.name ? ` · ${target.name}` : ""}`
       : "";
+    const opening = playerEl.hidden;
     playerEl.hidden = false;
     document.body.style.overflow = "hidden";
+    if (opening) {
+      openLayer(playerEl);
+      // The phone's or TV remote's Back button then closes the player, not the page.
+      history.pushState({ player: true }, "");
+    }
     fitPlayer();
     closeMenus();
     $("next-btn").hidden = true;
@@ -530,20 +622,32 @@
     $("player-toast").hidden = true;
     $("player-buffering").hidden = true;
     clearTimer("next");
+    clearTimer("skip");
+    state.countdown = false;
+    state.skipTarget = null;
     state.prefetched = false;
+    setMediaSession(target);
     wakeControls();
   }
 
   // Tell TorrServer to stop downloading a torrent we no longer play (fire and forget).
+  const releaseTorrent = (hash) =>
+    fetch(`/api/torrent-stop/${hash}`, { method: "POST", keepalive: true }).catch(() => {});
   function stopTorrent(hash) {
     video.pause();
-    fetch(`/api/torrent-stop/${hash}`, { method: "POST", keepalive: true }).catch(() => {});
+    releaseTorrent(hash);
   }
 
   function closePlayer() {
+    if (playerEl.hidden) return;
+    // Whatever play() is still waiting for must not start the video behind the page.
+    state.playGen += 1;
+    state.playAbort?.abort();
     saveProgress(true);
     if (state.current?.hash) stopTorrent(state.current.hash);
     Object.keys(state.timers).forEach(clearTimer);
+    state.countdown = false;
+    state.skipTarget = null;
     video.pause();
     video.removeAttribute("src");
     video.load();
@@ -552,10 +656,28 @@
     document.body.style.overflow = "";
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     state.current = null;
+    closeLayer(playerEl);
+    if (media) media.metadata = null;
+    setMediaAction("nexttrack", null);
+    if (history.state?.player) history.back();
     refreshHero();
     renderEpisodes();
   }
   $("player-close").addEventListener("click", closePlayer);
+
+  window.addEventListener("popstate", () => {
+    closeSheet();
+    closePlayer();
+  });
+  // Leaving the page (or the browser discarding it): keep the position, stop the download.
+  window.addEventListener("pagehide", () => {
+    saveProgress(true);
+    if (state.current?.hash) releaseTorrent(state.current.hash);
+  });
+  // Back from the browser's page cache: that torrent was stopped, start from the page again.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) closePlayer();
+  });
 
   function setStep(step, detail = "") {
     $("player-message").hidden = true;
@@ -589,6 +711,32 @@
     );
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  // "Copy link for VLC". navigator.clipboard only exists on https or localhost; on a LAN
+  // address over plain http the old way still works, and failing that the link is shown.
+  function copyButton(getUrl) {
+    return actionButton(t("copy_vlc"), async (event) => {
+      const button = event.currentTarget;
+      const url = getUrl();
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          const area = el("textarea", { readonly: true, style: "position:fixed;top:0;left:0;opacity:0" });
+          area.value = url;
+          playerEl.append(area); // inside the player: it may be the fullscreen element
+          area.select();
+          area.setSelectionRange(0, url.length);
+          const copied = document.execCommand("copy");
+          area.remove();
+          if (!copied) throw new Error("copy failed");
+        }
+        button.textContent = t("copied");
+      } catch {
+        window.prompt(t("copy_vlc"), url);
+      }
+    });
   }
 
   function toast(text, actions = []) {
@@ -670,8 +818,14 @@
       auto = false,
     } = {},
   ) {
+    // Only the latest play() may touch the player: a slower earlier one (another
+    // episode clicked meanwhile, or the player closed) stops at its next await.
+    const gen = ++state.playGen;
+    const stale = () => gen !== state.playGen;
+    state.playAbort?.abort();
     closeSheet();
     target = (await resolveEpisode(target)) || target;
+    if (stale()) return;
     if (hasSeason(target) && target.airDate && !isAired(target.airDate)) {
       openPlayer(target);
       showMessage(t("not_released"), t("episode_airs_on", { date: new Date(target.airDate).toLocaleDateString(SF.lang) }), [
@@ -712,6 +866,7 @@
         } else {
           setStep("search");
           const data = await findVersions(target);
+          if (stale()) return;
           const best = recommendedOf(data);
           if (!best) {
             showMessage(t("no_version_title"), t("no_version_text"), [
@@ -746,16 +901,27 @@
         "connect",
         torrent.quality ? `${qualityText(torrent)}, ${torrent.size}` : "",
       );
-      const data = await api("/api/play", {
-        magnet: torrent.magnet,
-        season: fileIndex === null ? target.season : null,
-        episode: fileIndex === null ? target.episode : null,
-        file_index: fileIndex,
-        title: hasSeason(target)
-          ? `${ctx.title} S${String(target.season).padStart(2, "0")}E${String(target.episode).padStart(2, "0")}`
-          : ctx.title,
-        poster: ctx.poster,
-      });
+      const controller = (state.playAbort = new AbortController());
+      const data = await api(
+        "/api/play",
+        {
+          magnet: torrent.magnet,
+          season: fileIndex === null ? target.season : null,
+          episode: fileIndex === null ? target.episode : null,
+          file_index: fileIndex,
+          title: hasSeason(target)
+            ? `${ctx.title} S${String(target.season).padStart(2, "0")}E${String(target.episode).padStart(2, "0")}`
+            : ctx.title,
+          poster: ctx.poster,
+        },
+        { signal: controller.signal },
+      );
+      if (stale()) {
+        // The player was closed meanwhile: don't let it download for nothing. (When
+        // another play() took over, that one may well be using the same torrent.)
+        if (playerEl.hidden) releaseTorrent(data.hash);
+        return;
+      }
       if (
         forcedStart === null &&
         stored &&
@@ -782,17 +948,22 @@
       renderFiles(data.files, data.file);
       $("audio-btn").hidden = true;
       const mode = await chooseMode(state.current);
+      if (stale()) return; // another play() started meanwhile
       renderAudioMenu();
-      if (state.current?.hash !== data.hash) return; // another play() started meanwhile
       setStep("buffer", data.file.name);
       if (mode) await startConverted(startAt, mode);
       else startVideo(data.stream_url, startAt);
+      if (stale()) return;
       loadSubtitles();
       const next = await resolveEpisode(nextEpisodeOf(target) || {});
+      if (stale()) return;
       const nextAvailable = next && hasSeason(next) && (!next.airDate || isAired(next.airDate));
+      const playNext = () => nextAvailable && play(next, { resume: false });
       $("next-btn").hidden = !nextAvailable;
-      $("next-btn").onclick = () => nextAvailable && play(next, { resume: false });
+      $("next-btn").onclick = playNext;
+      setMediaAction("nexttrack", nextAvailable ? playNext : null);
     } catch (error) {
+      if (stale()) return; // superseded (or aborted): its failure doesn't matter now
       showMessage(t("play_failed_title"), error.message, [
         actionButton(t("choose_other"), () => openSheet(target), true),
         error.data?.retry
@@ -920,6 +1091,9 @@
 
   async function startConverted(position, mode) {
     const current = state.current;
+    // Quick seeks each ask for a keyframe; only the latest one may start its stream
+    // (the answers can come back in any order).
+    const seq = ++state.convertSeq;
     let start = 0;
     if (position > 1) {
       try {
@@ -928,7 +1102,7 @@
         start = position;
       }
     }
-    if (current !== state.current) return;
+    if (current !== state.current || seq !== state.convertSeq) return;
     renderAudioMenu();
     const audio = mode.audio ?? current.audioTrack ?? 0;
     current.convert = { offset: start, duration: current.probe?.duration || 0, copyAudio: mode.copyAudio, audio };
@@ -939,21 +1113,30 @@
     applyOffset();
   }
 
+  const clampPosition = (position) => Math.min(Math.max(0, position), Math.max(0, dur() - 1));
+
+  // The stream's own time for `position` when that part is already loaded, else null.
+  function loadedAt(position) {
+    const local = position - (converted()?.offset || 0);
+    const buffered = video.buffered;
+    for (let i = 0; i < buffered.length; i++) {
+      if (local >= buffered.start(i) && local <= buffered.end(i)) return local;
+    }
+    return null;
+  }
+
   function seekTo(position) {
-    const target = Math.min(Math.max(0, position), Math.max(0, dur() - 1));
+    const target = clampPosition(position);
     const convert = converted();
     if (!convert) {
       video.currentTime = target;
       return;
     }
     // Inside what is already loaded: a normal seek. Otherwise restart ffmpeg there.
-    const local = target - convert.offset;
-    const buffered = video.buffered;
-    for (let i = 0; i < buffered.length; i++) {
-      if (local >= buffered.start(i) && local <= buffered.end(i)) {
-        video.currentTime = local;
-        return;
-      }
+    const local = loadedAt(target);
+    if (local !== null) {
+      video.currentTime = local;
+      return;
     }
     state.seekedAt = Date.now();
     $("player-buffering").hidden = false;
@@ -965,13 +1148,13 @@
     state.stallStart = null;
     applyVolume();
     video.src = url;
-    video.addEventListener(
-      "loadedmetadata",
-      () => {
-        if (startAt > 0 && (converted() || startAt < video.duration - 10)) video.currentTime = startAt;
-      },
-      { once: true },
-    );
+    // One pending start position: a stream replaced before its metadata arrived must not
+    // seek the next one too.
+    video.removeEventListener("loadedmetadata", state.onMetadata);
+    state.onMetadata = () => {
+      if (startAt > 0 && (converted() || startAt < video.duration - 10)) video.currentTime = startAt;
+    };
+    video.addEventListener("loadedmetadata", state.onMetadata, { once: true });
     video.play().catch(() => {
       /* autoplay blocked: the big play button is visible */
     });
@@ -997,6 +1180,7 @@
   video.addEventListener("seeking", () => {
     state.seekedAt = Date.now();
     state.stallStart = null;
+    cancelCountdown(); // going back after the end: stay in this episode
   });
   video.addEventListener("waiting", () => {
     if (!state.current) return;
@@ -1030,11 +1214,19 @@
     if (!state.current || !video.getAttribute("src")) return;
     const code = video.error?.code;
     const unsupported = code === 3 || code === 4;
+    // A converted stream fails like this too when the server had no free conversion slot
+    // (503) or TorrServer stopped delivering: start it again in a moment.
+    if (converted() && (!dur() || brokeOff())) return healConverted({ delay: 3000, unsupported });
+    showStreamError(unsupported);
+  });
+
+  // The stream can't go on: say so and offer another version, VLC or (`retry`) another try.
+  function showStreamError(unsupported, retry = null) {
     const target = state.current.target;
-    const copy = actionButton(t("copy_vlc"), async (event) => {
-      await navigator.clipboard.writeText(state.current?.streamUrl || video.currentSrc);
-      event.target.textContent = t("copied");
-    });
+    // This stream is done: no slow-start fallback behind the message, no more stats.
+    clearTimer("start");
+    clearTimer("stats");
+    const copy = copyButton(() => state.current?.streamUrl || video.currentSrc);
     showMessage(
       t(unsupported ? "unsupported_title" : "load_failed_title"),
       t(unsupported ? "unsupported_text" : "load_failed_text"),
@@ -1044,11 +1236,43 @@
           () => openSheet(target, { browserOnly: unsupported }),
           true,
         ),
+        retry ? actionButton(t("retry"), retry) : null,
         copy,
         actionButton(t("close"), closePlayer),
       ],
     );
-  });
+  }
+
+  // A converted stream that stops well before the known end was cut off (the server gives
+  // up after 60 s without data from TorrServer): not the end of the film.
+  const brokeOff = () => Boolean(converted()) && dur() > 0 && pos() < dur() - STALL_END_MARGIN;
+
+  // Start a cut-off or failed converted stream again where it stopped. After HEAL_RETRIES
+  // restarts at the same spot, the usual fallback to a faster version takes over.
+  function healConverted({ delay = 0, unsupported = false } = {}) {
+    const current = state.current;
+    const convert = converted();
+    const position = pos();
+    const restart = () =>
+      current === state.current && startConverted(position, { copyAudio: convert.copyAudio, audio: convert.audio });
+    const heal = current.heal && Math.abs(position - current.heal.at) < 10 ? current.heal : { at: position, count: 0 };
+    current.heal = heal;
+    clearTimer("start");
+    if (heal.count >= HEAL_RETRIES) {
+      current.heal = null;
+      showStreamError(unsupported, () => {
+        $("player-message").hidden = true;
+        $("player-buffering").hidden = false;
+        restart();
+      });
+      switchToFaster("stall");
+      return;
+    }
+    heal.count += 1;
+    // One spinner at a time: the small one only once the loading screen is gone.
+    $("player-buffering").hidden = !$("player-loading").hidden;
+    setTimer("heal", restart, delay);
+  }
 
   video.addEventListener("timeupdate", () => {
     saveProgress(false);
@@ -1068,11 +1292,25 @@
   video.addEventListener("pause", () => {
     saveProgress(true);
     updatePlayButton();
+    updatePositionState();
     wakeControls();
   });
-  video.addEventListener("play", updatePlayButton);
+  video.addEventListener("play", () => {
+    updatePlayButton();
+    cancelCountdown();
+  });
+  for (const type of ["playing", "seeked", "durationchange", "ratechange"]) video.addEventListener(type, updatePositionState);
+
+  // Stops the "next episode in N s" countdown, if one is running.
+  function cancelCountdown() {
+    if (!state.countdown) return;
+    state.countdown = false;
+    clearTimer("next");
+    $("player-message").hidden = true;
+  }
 
   video.addEventListener("ended", () => {
+    if (state.current && brokeOff()) return healConverted(); // cut off, not the end of the film
     saveProgress(true);
     const next = state.current && nextEpisodeOf(state.current.target);
     if (!next || !SF.settings.get().autoNext) return;
@@ -1082,25 +1320,27 @@
       () => play(next, { resume: false }),
       true,
     );
-    const cancel = actionButton(t("cancel"), () => {
-      clearTimer("next");
-      $("player-message").hidden = true;
-    });
+    const cancel = actionButton(t("cancel"), cancelCountdown);
     const tick = () => {
       showMessage(
         t("next_in", { n: seconds }),
         t("season_episode", { s: next.season, e: next.episode }),
         [playNow, cancel],
       );
-      if (seconds-- <= 0) play(next, { resume: false });
-      else setTimer("next", tick, 1000);
+      if (seconds-- <= 0) {
+        state.countdown = false;
+        play(next, { resume: false });
+      } else setTimer("next", tick, 1000);
     };
+    state.countdown = true;
     tick();
   });
 
   function saveProgress(force) {
     const current = state.current;
     if (!current || !dur() || !current.started) return;
+    if (video.ended && brokeOff()) return; // cut off, not watched to the end
+
     const now = Date.now();
     if (!force && now - (state.lastSave || 0) < 5000) return;
     state.lastSave = now;
@@ -1329,10 +1569,7 @@
         !state.tried.has(v.hash) &&
         v.hash !== current.hash,
     );
-    const copy = actionButton(t("copy_vlc"), async (event) => {
-      await navigator.clipboard.writeText(video.currentSrc);
-      event.target.textContent = t("copied");
-    });
+    const copy = copyButton(() => video.currentSrc);
     if (!alternative) {
       toast(t("no_audio_vlc"), [copy]);
       return;
@@ -1376,8 +1613,9 @@
   }
 
   function updateTimeline() {
+    if (dragging) return; // the bar follows the finger, not the video
     const duration = dur();
-    const now = pos();
+    const now = state.skipTarget ?? pos(); // quick skips still being added up: show where to
     const ratio = duration ? Math.min(1, now / duration) : 0;
     seekPlayed.style.width = `${ratio * 100}%`;
     seekThumb.style.left = `${ratio * 100}%`;
@@ -1403,14 +1641,29 @@
     return Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
   };
   let dragging = false;
-  // Direct streams seek while dragging; converted ones once, on release (each seek restarts ffmpeg).
+  // Direct streams seek while dragging, at most every DRAG_SEEK_EVERY ms (each seek is a
+  // new request to TorrServer); converted ones once, on release (each restarts ffmpeg).
+  const DRAG_SEEK_EVERY = 250;
   let dragRatio = null;
+  let dragSeekAt = 0;
+  let dragSeekRatio = null; // where the last seek during this drag went
+  const showRatio = (ratio) => {
+    seekPlayed.style.width = `${ratio * 100}%`;
+    seekThumb.style.left = `${ratio * 100}%`;
+  };
+  const dragSeek = (ratio) => {
+    dragSeekAt = Date.now();
+    dragSeekRatio = ratio;
+    seekTo(ratio * dur());
+  };
   seek.addEventListener("pointerdown", (event) => {
     if (!dur()) return;
     dragging = true;
     seek.setPointerCapture(event.pointerId);
     dragRatio = seekRatio(event);
-    if (!converted()) seekTo(dragRatio * dur());
+    dragSeekRatio = null;
+    showRatio(dragRatio);
+    if (!converted()) dragSeek(dragRatio);
   });
   seek.addEventListener("pointermove", (event) => {
     if (!dur()) return;
@@ -1420,16 +1673,19 @@
     seekTooltip.textContent = formatTime(ratio * dur());
     if (dragging) {
       dragRatio = ratio;
-      seekPlayed.style.width = `${ratio * 100}%`;
-      seekThumb.style.left = `${ratio * 100}%`;
-      if (!converted()) seekTo(ratio * dur());
+      showRatio(ratio);
+      if (!converted() && Date.now() - dragSeekAt >= DRAG_SEEK_EVERY) dragSeek(ratio);
     }
   });
-  seek.addEventListener("pointerup", () => {
-    if (dragging && converted() && dragRatio !== null) seekTo(dragRatio * dur());
+  const endDrag = () => {
+    // The final position, unless the last seek already went exactly there.
+    if (dragging && dragRatio !== null && dragRatio !== dragSeekRatio) seekTo(dragRatio * dur());
     dragging = false;
     dragRatio = null;
-  });
+    updateTimeline();
+  };
+  seek.addEventListener("pointerup", endDrag);
+  seek.addEventListener("pointercancel", endDrag);
   seek.addEventListener("pointerleave", () => (seekTooltip.hidden = true));
   seek.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -1446,9 +1702,42 @@
   };
   const skip = (seconds) => {
     if (!dur()) return;
-    seekTo(pos() + seconds);
     wakeControls();
+    // Converted streams restart ffmpeg for every seek outside what is loaded: quick
+    // presses (a TV remote's arrow held down) are added up into one restart.
+    const pending = state.skipTarget;
+    const target = clampPosition((pending ?? pos()) + seconds);
+    if (converted() && (pending !== null || loadedAt(target) === null)) {
+      state.skipTarget = target;
+      updateTimeline();
+      setTimer(
+        "skip",
+        () => {
+          const to = state.skipTarget;
+          state.skipTarget = null;
+          if (to !== null) seekTo(to);
+        },
+        400,
+      );
+      return;
+    }
+    seekTo(target);
   };
+
+  // Media keys, lock screen and TV-remote buttons (next track is set per episode in play()).
+  setMediaAction("play", () => video.paused && togglePlay());
+  setMediaAction("pause", () => !video.paused && togglePlay());
+  setMediaAction("seekbackward", (details) => skip(-(details.seekOffset || 10)));
+  setMediaAction("seekforward", (details) => skip(details.seekOffset || 10));
+  setMediaAction("seekto", (details) => {
+    if (dur() && Number.isFinite(details.seekTime)) seekTo(details.seekTime);
+  });
+
+  // A mouse click on a player button doesn't keep the focus there, so Space and the arrow
+  // keys keep controlling the video; keyboard and TV-remote focus still work as usual.
+  playerEl.addEventListener("mousedown", (event) => {
+    if (event.target.closest("button")) event.preventDefault();
+  });
 
   function applyVolume() {
     const { volume, muted } = SF.settings.get();
@@ -1540,6 +1829,10 @@
   const subsMenu = $("subs-menu");
 
   function clearTracks() {
+    // Downloads and AI windows still on their way belong to what is being removed.
+    state.subRequest?.abort();
+    state.subRequest = null;
+    state.ai?.controller.abort();
     state.ai = null;
     $("ai-status").hidden = true;
     // Hide first: Chrome keeps painting the last cue of a removed track that was showing.
@@ -1734,11 +2027,18 @@
     }
     if (candidate.source === "ai") return startAiSubtitles(candidate);
     subsLabel.textContent = candidate.translatedFrom ? t("subs_translating") : `${candidate.language_name}…`;
+    // Another pick, "Off" or another episode meanwhile aborts this one (clearTracks).
+    const request = (state.subRequest = new AbortController());
+    const current = state.current;
+    const outdated = () => request !== state.subRequest || current !== state.current;
     try {
       // Fetch first so a failed download can fall back instead of failing silently.
-      const response = await fetch(candidate.url);
+      const response = await fetch(candidate.url, { signal: request.signal });
       if (!response.ok) throw new Error(await response.text());
-      const src = URL.createObjectURL(await response.blob());
+      const blob = await response.blob();
+      if (outdated()) return;
+      state.subRequest = null;
+      const src = URL.createObjectURL(blob);
       const track = el("track", {
         kind: "subtitles",
         label: candidate.language_name,
@@ -1759,7 +2059,6 @@
       // Subtitles from the torrent or matched by file hash are made for this file;
       // everything else gets aligned to the speech once playback has started.
       if (candidate.source !== "torrent" && !candidate.hash_match) {
-        const current = state.current;
         const whenPlaying = () => {
           if (current !== state.current || candidate !== state.activeSub) return;
           if (video.paused || pos() < 5) return setTimer("subsync", whenPlaying, 3000);
@@ -1768,6 +2067,7 @@
         setTimer("subsync", whenPlaying, 4000);
       }
     } catch {
+      if (outdated()) return; // aborted or replaced: nothing to fall back for
       const alternatives = state.subs.filter(
         (c) => c.language === candidate.language && c.id !== candidate.id,
       );
@@ -1834,7 +2134,8 @@
     const track = el("track", { kind: "subtitles", label: "AI", srclang: candidate.translate || "und", src: URL.createObjectURL(blob), default: true });
     video.append(track);
     track.track.mode = "showing";
-    const ai = { candidate, track, current: state.current, windows: new Map(), inflight: 0, failures: 0, warned: false };
+    // `controller` is aborted together with the track: the server stops working on its windows.
+    const ai = { candidate, track, current: state.current, windows: new Map(), inflight: 0, failures: 0, warned: false, controller: new AbortController() };
     state.ai = ai;
     state.activeSub = candidate;
     state.subSync = null;
@@ -1853,8 +2154,13 @@
     const ai = state.ai;
     const box = $("ai-status");
     const waiting = ai && !ai.stopped && ai.current === state.current && ai.windows.get(Math.floor(pos() / AI_WINDOW)) !== "done";
-    box.hidden = !waiting;
-    if (waiting) $("ai-status-text").textContent = t(ai.slow ? "subs_ai_waiting_torrent" : "subs_ai_listening");
+    // Called on every timeupdate: touch the live region only when something changes,
+    // or screen readers keep announcing it.
+    if (box.hidden !== !waiting) box.hidden = !waiting;
+    if (!waiting) return;
+    const text = t(ai.slow ? "subs_ai_waiting_torrent" : "subs_ai_listening");
+    const node = $("ai-status-text");
+    if (node.textContent !== text) node.textContent = text;
   }
 
   function aiTick() {
@@ -1878,6 +2184,7 @@
   async function aiFetch(n) {
     const ai = state.ai;
     if (!ai || n < 0 || ai.windows.has(n) || ai.inflight >= 1) return;
+    if (Date.now() < (ai.retryAt || 0)) return; // the server asked to wait
     if (dur() && n * AI_WINDOW >= dur()) return;
     const current = ai.current;
     ai.windows.set(n, "loading");
@@ -1893,7 +2200,7 @@
     });
     let retryIn = 0;
     try {
-      const response = await fetch(`/api/subtitles/ai/${current.hash}/${current.file.index}?${params}`);
+      const response = await fetch(`/api/subtitles/ai/${current.hash}/${current.file.index}?${params}`, { signal: ai.controller.signal });
       const data = await response.json().catch(() => ({}));
       if (state.ai !== ai) return;
       if (!response.ok || !data.success) {
@@ -1910,28 +2217,33 @@
         } else {
           retryIn = 5000;
         }
-        return;
+      } else {
+        ai.failures = 0;
+        ai.slow = false;
+        ai.windows.set(n, "done");
+        ai.spoken ||= data.language || ""; // later windows: known language, English route if useful
+        const cues = ai.track.track;
+        for (const line of data.lines || []) {
+          const cue = new VTTCue(line.start, line.end, line.text);
+          placeCue(cue);
+          cues.addCue(cue);
+        }
+        if (subsLabel.textContent === t("subs_ai_starting")) subsLabel.textContent = t("subs_ai_label");
       }
-      ai.failures = 0;
-      ai.slow = false;
-      ai.windows.set(n, "done");
-      ai.spoken ||= data.language || ""; // later windows: known language, English route if useful
-      const cues = ai.track.track;
-      for (const line of data.lines || []) {
-        const cue = new VTTCue(line.start, line.end, line.text);
-        placeCue(cue);
-        cues.addCue(cue);
-      }
-      if (subsLabel.textContent === t("subs_ai_starting")) subsLabel.textContent = t("subs_ai_label");
     } catch {
+      if (state.ai !== ai) return; // aborted together with its track
       ai.windows.delete(n);
       retryIn = 5000;
     } finally {
       ai.inflight -= 1;
       updateAiStatus();
     }
-    if (retryIn) setTimeout(aiTick, retryIn);
-    else aiTick();
+    if (ai.stopped) return;
+    if (retryIn) {
+      // Wait it out: timeupdate would otherwise ask again a moment later.
+      ai.retryAt = Date.now() + retryIn - 100; // the timer below may fire a hair early
+      setTimer("ai", aiTick, retryIn);
+    } else aiTick();
   }
 
   // Align the active subtitle to the speech around the current position.
@@ -2002,9 +2314,12 @@
 
   const sheet = $("versions");
   let sheetTarget = null;
+  let sheetSeq = 0; // latest search shown in the sheet (quality or query changed meanwhile)
 
   function closeSheet() {
+    if (sheet.hidden) return;
     sheet.hidden = true;
+    closeLayer(sheet);
   }
   sheet
     .querySelectorAll("[data-close]")
@@ -2023,8 +2338,11 @@
     target,
     { focusSearch = false, browserOnly = false, query = "" } = {},
   ) {
+    const seq = ++sheetSeq;
     sheetTarget = target;
+    const opening = sheet.hidden;
     sheet.hidden = false;
+    if (opening) openLayer(sheet, sheet.querySelector(".sheet-panel"));
     $("sheet-quality").value = SF.settings.get().quality;
     $("versions-context").textContent = [
       ctx.title,
@@ -2049,10 +2367,10 @@
     }
     try {
       const data = await findVersions(target, query);
-      if (sheetTarget !== target) return;
+      if (seq !== sheetSeq) return;
       renderVersions(data, target, { browserOnly });
     } catch (error) {
-      status.textContent = t("search_failed", { error: error.message });
+      if (seq === sheetSeq) status.textContent = t("search_failed", { error: error.message });
     }
   }
 
@@ -2269,6 +2587,23 @@
       return;
     }
     if (playerEl.hidden || !sheet.hidden) return;
+    // TV remotes: Down from the player goes to its buttons, Up from the buttons comes back
+    // (where the arrows seek again).
+    if (event.key === "ArrowDown" && event.target === playerEl) {
+      const first = [...playerEl.querySelectorAll(".controls-row button")].find((b) => !b.disabled && b.offsetParent !== null);
+      if (first) {
+        event.preventDefault();
+        first.focus();
+        wakeControls();
+        return;
+      }
+    }
+    if (event.key === "ArrowUp" && event.target.closest(".controls-row button")) {
+      event.preventDefault();
+      playerEl.focus({ preventScroll: true });
+      wakeControls();
+      return;
+    }
     const key = event.key.toLowerCase();
     const actions = {
       " ": togglePlay,
@@ -2296,12 +2631,13 @@
     if (!actions[key]) return;
     if (event.target.closest("button") && (key === " " || key === "enter"))
       return;
+    // Arrows seek and change the volume only when no control has the focus: on a
+    // control they move between the buttons (TV remotes, spatial navigation).
+    if (key.startsWith("arrow") && ![document.body, video, playerEl, seek].includes(event.target)) return;
     event.preventDefault();
     actions[key]();
     wakeControls();
   });
-
-  window.addEventListener("beforeunload", () => saveProgress(true));
 
   // ============================================================= start
 

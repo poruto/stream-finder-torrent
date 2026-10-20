@@ -4,7 +4,7 @@
 {% block content %}
   {% if billboard %}
   <section class="hero hero-billboard">
-    <img class="hero-backdrop" src="{{ billboard.backdrop }}" alt="" fetchpriority="high">
+    <img class="hero-backdrop" src="{{ billboard.backdrop }}" {% if billboard.backdrop_srcset %}srcset="{{ billboard.backdrop_srcset }}" sizes="100vw"{% endif %} alt="" fetchpriority="high">
     <div class="hero-body">
       <h1 class="hero-title">{{ billboard.title }}</h1>
       <p class="hero-facts">
