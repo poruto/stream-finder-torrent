@@ -39,6 +39,7 @@
       </li>
     </ul>
 
+    {% if is_admin %}
     <section class="library" id="library" aria-labelledby="library-title">
       <header class="library-head">
         <h2 id="library-title">{{ t('library_title') }}</h2>
@@ -51,8 +52,11 @@
       </div>
       <ul class="library-list" id="library-list"></ul>
     </section>
+    {% else %}
+    <p class="muted library">{{ t('library_login') }}</p>
+    {% endif %}
   </div>
 {% endblock %}
 {% block scripts %}
-  <script src="{{ asset('js/library.js') }}" defer></script>
+  {% if is_admin %}<script src="{{ asset('js/library.js') }}" defer></script>{% endif %}
 {% endblock %}

@@ -2929,7 +2929,8 @@ select option:checked {
     inset: auto 0 0 0;
     z-index: 40;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-auto-flow: column; /* one row however many tabs there are */
+    grid-auto-columns: minmax(0, 1fr);
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
     background: rgba(20, 20, 20, 0.96);
@@ -2939,10 +2940,20 @@ select option:checked {
     display: grid;
     justify-items: center;
     gap: 2px;
+    min-width: 0;
     padding: 4px 0;
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-3);
     text-decoration: none;
+  }
+  .tabbar span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nav-profile {
+    margin-left: auto; /* at the right, next to the TorrServer dot */
   }
   .tabbar a[aria-current="page"] {
     color: var(--text);

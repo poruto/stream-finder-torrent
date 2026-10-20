@@ -14,7 +14,7 @@ class FakeTMDB:
     def __init__(self, pages):
         self.pages = pages
 
-    def _get(self, path, ttl=0, **params):
+    def _get(self, path, ttl=0, language=None, **params):
         return self.pages[path]
 
 

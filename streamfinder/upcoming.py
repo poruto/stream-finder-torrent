@@ -6,11 +6,14 @@ give their cinema premiere and - more useful for torrents - their digital releas
 """
 
 import datetime
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 
+from . import config
+from .i18n import tmdb_locale
 from .services import services
 from .tmdb import TMDBError, image_url
 from .views import detail_url
@@ -18,6 +21,10 @@ from .views import detail_url
 upcoming_bp = Blueprint("upcoming", __name__)
 
 DAYS_AHEAD = 60
+# Placeholder names that say nothing ("Episode 169", "169. epizoda", "Díl 3").
+_GENERIC_NAME = re.compile(
+    r"(?i)\s*(?:(?:episode|epizoda|díl|dil|folge)\s*\d+|\d+\.?\s*(?:episode|epizoda|díl|dil))?\s*"
+)
 DAY_TTL = 12 * 3600
 DIGITAL, PHYSICAL, THEATRICAL = 4, 5, 3
 
@@ -26,15 +33,20 @@ def _ids(name: str) -> list[int]:
     return [int(i) for i in request.args.get(name, "").split(",") if i.isdigit()][:40]
 
 
-def show_events(tmdb, tmdb_id: int, today: str, until: str) -> list[dict[str, Any]]:
+def show_events(
+    tmdb, tmdb_id: int, today: str, until: str, language: str | None = None
+) -> list[dict[str, Any]]:
     """The show's episodes airing between `today` and `until` (specials left out)."""
-    show = tmdb._get(f"/tv/{tmdb_id}", ttl=DAY_TTL)
+    show = tmdb._get(f"/tv/{tmdb_id}", ttl=DAY_TTL, language=language)
     upcoming = show.get("next_episode_to_air") or {}
     season = upcoming.get("season_number")
     if not season:
         return []
     episodes = (
-        tmdb._get(f"/tv/{tmdb_id}/season/{season}", ttl=DAY_TTL).get("episodes") or []
+        tmdb._get(f"/tv/{tmdb_id}/season/{season}", ttl=DAY_TTL, language=language).get(
+            "episodes"
+        )
+        or []
     )
     base = {
         "type": "tv",
@@ -49,7 +61,7 @@ def show_events(tmdb, tmdb_id: int, today: str, until: str) -> list[dict[str, An
             "date": ep["air_date"],
             "season": season,
             "episode": ep.get("episode_number"),
-            "name": ep.get("name") or "",
+            "name": "" if _GENERIC_NAME.fullmatch(ep.get("name") or "") else ep["name"],
             "premiere": ep.get("episode_number") == 1,
         }
         for ep in episodes
@@ -57,10 +69,15 @@ def show_events(tmdb, tmdb_id: int, today: str, until: str) -> list[dict[str, An
     ]
 
 
-def movie_events(tmdb, tmdb_id: int, today: str, until: str) -> list[dict[str, Any]]:
+def movie_events(
+    tmdb, tmdb_id: int, today: str, until: str, language: str | None = None
+) -> list[dict[str, Any]]:
     """Cinema premiere and the first digital release, when they are still ahead."""
     movie = tmdb._get(
-        f"/movie/{tmdb_id}", ttl=DAY_TTL, append_to_response="release_dates"
+        f"/movie/{tmdb_id}",
+        ttl=DAY_TTL,
+        language=language,
+        append_to_response="release_dates",
     )
     dates: dict[int, str] = {}
     for country in (movie.get("release_dates") or {}).get("results") or []:
@@ -88,6 +105,8 @@ def movie_events(tmdb, tmdb_id: int, today: str, until: str) -> list[dict[str, A
 @upcoming_bp.route("/calendar")
 def page():
     """The Calendar tab; filled in the browser from the household's progress and My list."""
+    if not config.TMDB_API_KEY:  # like every other page: the key first
+        return redirect(url_for("web.settings", setup=1))
     return render_template("calendar.html", days=DAYS_AHEAD)
 
 
@@ -100,6 +119,7 @@ def upcoming():
         start.isoformat(),
         (start + datetime.timedelta(days=DAYS_AHEAD)).isoformat(),
     )
+    language = tmdb_locale()  # the visitor's: the pool's threads have no request
     jobs = [(show_events, i) for i in _ids("shows")] + [
         (movie_events, i) for i in _ids("movies")
     ]
@@ -107,7 +127,7 @@ def upcoming():
     def run(job):
         fetch, tmdb_id = job
         try:
-            return fetch(tmdb, tmdb_id, today, until)
+            return fetch(tmdb, tmdb_id, today, until, language)
         except TMDBError:
             return []
 

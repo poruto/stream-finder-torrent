@@ -31,9 +31,23 @@
   const describe = (event) => {
     if (event.kind === "cinema") return t("calendar_cinema");
     if (event.kind === "digital") return t("calendar_digital");
+    if (event.last) return t("season_episodes", { s: event.season, from: event.episode, to: event.last });
     const number = t("season_episode", { s: event.season, e: event.episode });
     return event.name ? `${number} · ${event.name}` : number;
   };
+
+  // A whole season released on one day is one row ("Season 2, episodes 1-10").
+  function mergeDrops(list) {
+    const merged = [];
+    for (const event of list) {
+      const previous = merged[merged.length - 1];
+      if (event.kind === "episode" && previous?.kind === "episode" && previous.id === event.id && previous.season === event.season) {
+        previous.last = event.episode;
+        previous.premiere ||= event.premiere;
+      } else merged.push({ ...event });
+    }
+    return merged;
+  }
 
   function render(events, today) {
     const days = new Map();
@@ -41,6 +55,7 @@
       if (!days.has(event.date)) days.set(event.date, []);
       days.get(event.date).push(event);
     }
+    for (const [date, list] of days) days.set(date, mergeDrops(list));
     root.replaceChildren(
       ...[...days].map(([date, list]) =>
         el("section", { className: "calendar-day" }, [

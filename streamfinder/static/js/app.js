@@ -456,9 +456,11 @@
         }
       }
     };
-    SF.api("/api/keys")
-      .then(renderState)
-      .catch(() => {});
+    // Only the admin's page has these (a visitor's request would just be refused).
+    if (document.getElementById("admin-logout"))
+      SF.api("/api/keys")
+        .then(renderState)
+        .catch(() => {});
 
     const submit = async (form, body) => {
       const message = form.querySelector(".key-message");

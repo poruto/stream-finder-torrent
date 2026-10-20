@@ -550,6 +550,7 @@ def status():
         subtitles=svc.subtitles.status(),
         imdb_ready=svc.imdb.ready,
         imdb_count=svc.imdb.count if svc.imdb.ready else 0,
+        is_admin=auth.is_admin(),
     )
 
 

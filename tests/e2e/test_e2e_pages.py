@@ -56,14 +56,7 @@ def test_unreleased_title_has_out_badge(page):
         f"/movie/{fakes.MOVIE_ID}",
         f"/show/{fakes.SHOW_ID}",
         "/movies",
-        pytest.param(
-            "/calendar",
-            marks=pytest.mark.xfail(
-                reason="BUG: /calendar (upcoming blueprint) skips the TMDB-key check of the "
-                "web blueprint, so without a key it shows an empty calendar instead of setup",
-                strict=True,
-            ),
-        ),
+        "/calendar",
     ],
 )
 @pytest.mark.console_errors_ok  # the visitor's 401 from /api/keys, see below
@@ -105,11 +98,11 @@ def test_calendar_groups_followed_shows_by_day(page):
     assert days.count() == 2
     first = days.nth(0)
     assert first.locator("h2").inner_text() == "Tomorrow"
+    # Two episodes out the same day are one row.
     items = first.locator(".calendar-item")
-    assert items.count() == 2
+    assert items.count() == 1
     assert "Upcoming Show" in items.nth(0).inner_text()
-    assert "Season 2, episode 1 · Return" in items.nth(0).inner_text()
-    assert "Season 2, episode 2 · Same Night" in items.nth(1).inner_text()
+    assert "Season 2, episodes 1-2" in items.nth(0).inner_text()
     assert items.nth(0).locator(".calendar-tag").inner_text() == "Season premiere"
     assert items.nth(0).get_attribute("href") == f"/show/{fakes.UPCOMING_ID}"
     assert days.nth(1).locator(".calendar-item").count() == 1
@@ -180,11 +173,6 @@ def test_no_console_errors_for_admin(page, path):
 @pytest.mark.parametrize(
     "path, endpoint",
     [("/settings", "/api/keys"), ("/status", "/api/library")],
-)
-@pytest.mark.xfail(
-    reason="BUG: the page asks an admin-only endpoint even when nobody is logged in; "
-    "the expected 401 shows up as an error in the browser console",
-    strict=True,
 )
 def test_no_console_errors_for_visitors(page, path, endpoint):
     """Someone who isn't the admin opens a page that has admin parts."""
