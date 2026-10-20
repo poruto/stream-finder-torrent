@@ -38,6 +38,9 @@
     subs: [],
     activeSub: null,
     subOffset: 0,
+    subSync: null, // { pieces, offset, scale } from the server's subtitle sync
+    subSyncChecks: [], // positions the active subtitle was synced at
+    syncRequest: null, // AbortController of the subtitle sync in progress
     tried: new Set(), // info hashes already attempted for this title/episode
     switches: 0,
     stallStart: null,
@@ -1869,6 +1872,10 @@
     state.ai?.controller.abort();
     state.ai = null;
     $("ai-status").hidden = true;
+    state.syncRequest?.abort();
+    state.syncRequest = null;
+    clearTimer("subsync-check");
+    showSyncStatus("");
     // Hide first: Chrome keeps painting the last cue of a removed track that was showing.
     for (const textTrack of video.textTracks) textTrack.mode = "disabled";
     for (const track of video.querySelectorAll("track")) {
@@ -2089,6 +2096,7 @@
       track.track.mode = "showing";
       state.activeSub = candidate;
       state.subSync = null;
+      state.subSyncChecks = [];
       subsLabel.textContent = candidate.language_name;
       // Subtitles from the torrent or matched by file hash are made for this file;
       // everything else gets aligned to the speech once playback has started.
@@ -2112,7 +2120,7 @@
     renderSubsMenu();
   }
 
-  // Cue time = original * scale + automatic sync + the user's manual offset,
+  // Cue time = original mapped by the automatic sync + the user's manual offset,
   // minus the start of a converted stream (whose clock begins at 0 there).
   function applyOffset() {
     const cues = video.querySelector("track")?.track.cues;
@@ -2122,12 +2130,27 @@
 
   function placeCue(cue) {
     cue.orig ??= [cue.startTime, cue.endTime];
-    const scale = state.subSync?.scale || 1;
-    const shift = (state.subSync?.offset || 0) + state.subOffset - (converted()?.offset || 0);
+    const shift = state.subOffset - (converted()?.offset || 0);
     // Not clamped to 0: after a seek in a converted stream the lines before its start
     // would all pile up at 0:00. Negative times are simply never shown.
-    cue.startTime = cue.orig[0] * scale + shift;
-    cue.endTime = cue.orig[1] * scale + shift;
+    cue.startTime = mapTime(cue.orig[0]) + shift;
+    cue.endTime = mapTime(cue.orig[1]) + shift;
+  }
+
+  // Subtitle time -> video time by the pieces the sync measured (sync.py `mapped`):
+  // inside a piece, before the first and after the last t * scale + offset, between
+  // two pieces a straight line from one to the other.
+  function mapTime(t) {
+    const pieces = state.subSync?.pieces;
+    if (!pieces?.length) return t;
+    let i = 0;
+    while (i < pieces.length - 1 && pieces[i + 1].start <= t) i += 1;
+    const p = pieces[i];
+    const at = (piece, x) => x * piece.scale + piece.offset;
+    if (t < p.start || t <= p.end || i === pieces.length - 1) return at(p, t);
+    const q = pieces[i + 1];
+    const a = at(p, p.end);
+    return a + ((t - p.end) / (q.start - p.end)) * (at(q, q.start) - a);
   }
 
   // ------------------------------------------------------------- AI subtitles
@@ -2283,42 +2306,136 @@
     } else aiTick();
   }
 
-  // Align the active subtitle to the speech around the current position.
-  async function syncSubtitles({ manual = false } = {}) {
+  // Align the active subtitle to the speech around the current position. The server
+  // reports what it is doing as it goes ("Listening 2/5…"), shown over the video and
+  // in the subtitles menu. `quiet`: a later re-check, shown only when it changes something.
+  const RECHECK = 600; // seconds of film between re-checks (another cut, slow drift)
+
+  async function syncSubtitles({ quiet = false } = {}) {
     const current = state.current;
     const sub = state.activeSub;
-    if (!current || !sub || sub.source === "ai") return;
+    if (!current || !sub || sub.source === "ai" || state.syncRequest) return;
+    const request = (state.syncRequest = new AbortController());
+    const outdated = () => request !== state.syncRequest || current !== state.current || sub !== state.activeSub;
+    const position = pos();
+    state.subSyncChecks.push(position);
     const button = $("subs-autosync");
     button.disabled = true;
     button.textContent = t("syncing_subs");
+    if (!quiet) showSyncStatus(t("syncing_subs"), true);
     try {
-      const result = await api("/api/subtitles/sync", {
-        hash: current.hash,
-        file_index: current.file.index,
-        subtitle: sub.syncId || sub.id,
-        position: pos(),
-        audio: current.audioTrack || 0,
-      });
-      if (current !== state.current || sub !== state.activeSub) return;
-      if (result.applied) {
-        state.subSync = { offset: result.offset, scale: result.scale };
+      const result = await syncStream(
+        {
+          hash: current.hash,
+          file_index: current.file.index,
+          subtitle: sub.syncId || sub.id,
+          position,
+          audio: current.audioTrack || 0,
+        },
+        request.signal,
+        (step) => {
+          if (!quiet && !outdated()) showSyncStatus(syncStepText(step), true);
+        },
+      );
+      if (outdated()) return;
+      if (result.pieces?.length) {
+        state.subSync = { pieces: result.pieces, offset: result.offset, scale: result.scale };
         applyOffset();
-        const drift = Math.abs(result.scale - 1) > 0.001;
-        const key = drift ? "subs_synced_fps" : result.method === "text" ? "subs_synced_text" : "subs_synced";
-        toast(t(key, { s: formatShift(result.offset) }));
-      } else if (manual) {
-        toast(t(result.baseline >= 0.45 ? "subs_already_synced" : "subs_sync_unsure"));
       }
-    } catch (error) {
-      if (manual) toast(t("subs_sync_failed"));
+      if (!quiet || (result.certain && result.changed)) showSyncStatus(syncResultText(result));
+      setTimer("subsync-check", followSync, 30000);
+    } catch {
+      if (outdated()) return; // aborted: another subtitle, another episode
+      if (!quiet) showSyncStatus(t("subs_sync_failed"));
     } finally {
-      button.disabled = false;
+      if (request === state.syncRequest) state.syncRequest = null;
+      button.disabled = !state.activeSub || state.activeSub.source === "ai";
       button.textContent = t("sync_by_audio");
     }
   }
 
+  // Once synced, look again wherever the film has got far from every checked place:
+  // a release cut differently needs another offset after the cut.
+  function followSync() {
+    const sub = state.activeSub;
+    if (!state.current || !sub || sub.source === "ai") return;
+    const far = state.subSyncChecks.every((p) => Math.abs(pos() - p) >= RECHECK);
+    if (far && !video.paused && !state.syncRequest) syncSubtitles({ quiet: true });
+    else setTimer("subsync-check", followSync, 30000);
+  }
+
+  // POST to the sync endpoint and hand each progress line to `onStep` as it arrives;
+  // resolves with the last line (the result).
+  async function syncStream(body, signal, onStep) {
+    const response = await fetch("/api/subtitles/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    let result = null;
+    let rest = "";
+    const handle = (line) => {
+      if (!line.trim()) return;
+      const step = JSON.parse(line);
+      if (step.done) result = step;
+      else onStep(step);
+    };
+    if (response.body?.getReader) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const lines = (rest + decoder.decode(value, { stream: true })).split("\n");
+        rest = lines.pop();
+        lines.forEach(handle);
+      }
+    } else rest = await response.text(); // no streaming here: all lines at the end
+    rest.split("\n").forEach(handle);
+    if (!result?.success) throw new Error(result?.error || "sync failed");
+    return result;
+  }
+
+  const syncStepText = (step) =>
+    step.stage === "listening" ? t("sync_listening", { n: step.step, total: step.steps }) : t("sync_matching");
+
+  // "Synced: +1.24 s · frame rate fixed" - the shift where the film is now.
+  function syncSummary() {
+    const pieces = state.subSync?.pieces || [];
+    const parts = [t("sync_done", { s: formatShift(mapTime(pos()) - pos()) })];
+    if (pieces.some((p) => Math.abs(p.scale - 1) > 0.001)) parts.push(t("sync_fps"));
+    if (new Set(pieces.map((p) => Math.round(p.offset * 2))).size > 1) parts.push(t("sync_parts"));
+    return parts.join(" · ");
+  }
+
+  function syncResultText(result) {
+    if (result.certain) return result.applied ? syncSummary() : t("subs_already_synced");
+    if (result.applied) return t("sync_unsure_kept", { s: syncSummary() });
+    return t(result.baseline >= 0.45 ? "subs_already_synced" : "subs_sync_unsure");
+  }
+
+  // The sync's state over the video (looks like "AI is listening") and in the subtitles
+  // menu; a final message leaves the video after a few seconds but stays in the menu.
+  function showSyncStatus(text, busy = false) {
+    const box = $("sync-status");
+    const line = $("subs-sync-state");
+    clearTimer("sync-status");
+    box.hidden = !text;
+    line.hidden = !text;
+    $("sync-status-text").textContent = text;
+    line.textContent = text;
+    $("sync-dots").hidden = !busy;
+    if (text && !busy) setTimer("sync-status", () => (box.hidden = true), 5000);
+  }
+
   const formatShift = (seconds) => {
-    const text = `${seconds > 0 ? "+" : ""}${seconds.toFixed(1)} s`;
+    const digits = Math.abs(seconds) < 10 ? 2 : 1; // the sync is exact to a few hundredths
+    const text = `${seconds > 0 ? "+" : ""}${seconds.toFixed(digits)} s`;
     return SF.lang === "cs" ? text.replace(".", ",") : text;
   };
 
@@ -2340,7 +2457,7 @@
   });
   for (const menu of [subsMenu, episodesMenu])
     menu.addEventListener("click", (event) => event.stopPropagation());
-  $("subs-autosync").addEventListener("click", () => syncSubtitles({ manual: true }));
+  $("subs-autosync").addEventListener("click", () => syncSubtitles());
   document
     .querySelectorAll("[data-sync]")
     .forEach((b) =>

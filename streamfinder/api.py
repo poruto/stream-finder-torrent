@@ -10,15 +10,29 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
 
 from . import auth, config
 from .auth import admin_required
+from .caching import LRU
 from .i18n import t
 from .matching import normalize_title
 from .services import services
-from .subtitles.sync import align, align_text, confirm
-from .subtitles.transcribe import LOCAL_URL, TranscribeError
+from .subtitles.sync import (
+    align,
+    confirm,
+    fit_pairs,
+    match_words,
+    merge,
+    nearest,
+    spoken_words,
+)
+from .subtitles.transcribe import (
+    LOCAL_URL,
+    OVERLAP,
+    TranscribeError,
+    _language_code,
+)
 from .subtitles.whisper_models import MODELS as WHISPER_MODELS
 from .tmdb import TMDBError, match_titles
 from .torrents import SearchQuery
@@ -454,8 +468,15 @@ def sync_subtitles():
     """Align a subtitle to the speech around `position`.
 
     Body: {hash, file_index, subtitle (candidate id), position, audio?}
-    Returns {offset, scale, confidence, applied, method}: cue times become t * scale + offset.
-    `applied` is true only when the shift is certain; otherwise nothing should change.
+    Returns {pieces, offset, scale, certain, changed, applied, method}: a cue at
+    subtitle time t belongs at t * scale + offset of the piece it falls in (between
+    pieces, on the straight line from one to the next); `offset`/`scale` are the
+    ones at `position`. Measurements add up per subtitle, so syncing again later
+    in the film can fix another cut. Only a `certain` measurement changes anything.
+
+    With `Accept: application/x-ndjson` the progress comes first, one JSON object
+    per line ({"stage": "listening", "step": 1, "steps": 5}, {"stage": "matching"}),
+    and the last line is the result with "done": true.
     """
     body = _body()
     svc = services()
@@ -475,9 +496,35 @@ def sync_subtitles():
         logger.info("subtitle sync failed: %s", e)
         return jsonify(success=False, error=str(e)), 502
 
+    steps = _sync_steps(svc, url, candidate, cues, position, audio_track)
+    if "application/x-ndjson" in request.headers.get("Accept", ""):
+        lines = (json.dumps(step) + "\n" for step in steps)
+        return Response(
+            stream_with_context(lines),
+            mimetype="application/x-ndjson",
+            # Proxies must pass each line on at once, not when the sync is over.
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    *_, result = steps
+    status = result.pop("status", 200)
+    return jsonify(result), status
+
+
+SYNC_WINDOW = 30  # seconds of audio per transcript window
+# Pieces measured so far per (stream, subtitle, audio track): a few films' worth.
+_sync_maps = LRU(32)
+# Word-timed transcripts per (stream, start, audio track): syncing again costs nothing.
+_heard = LRU(240)
+
+
+def _sync_steps(svc, url, candidate, cues, position, audio_track):
+    """Progress of one subtitle sync, then its result (dicts for the player)."""
+    key = (url, candidate, audio_track)
+    known = _sync_maps.get(key) or []
+    result = None
     if svc.transcriber.available:
         try:
-            result = _sync_by_text(
+            result = yield from _sync_by_text(
                 svc,
                 url,
                 cues,
@@ -485,40 +532,87 @@ def sync_subtitles():
                 position,
                 audio_track,
             )
-            if result is not None:
-                return jsonify(success=True, **result.to_dict())
         except TranscribeError as e:  # fall back to speech detection
             logger.info("text-based subtitle sync failed: %s", e)
-
-    try:
-        result = _sync_by_speech(svc, url, [(s, e) for s, e, _ in cues], position)
-    except Exception as e:  # ffmpeg timeout, slow torrent
-        logger.info("subtitle sync failed: %s", e)
-        return jsonify(success=False, error=str(e)), 502
     if result is None:
-        return jsonify(success=False, error="no speech found"), 422
-    return jsonify(success=True, **result.to_dict())
+        try:
+            result = yield from _sync_by_speech(
+                svc, url, [(s, e) for s, e, _ in cues], position
+            )
+        except Exception as e:  # ffmpeg timeout, slow torrent
+            logger.info("subtitle sync failed: %s", e)
+            yield {"done": True, "success": False, "error": str(e), "status": 502}
+            return
+    if result is None:
+        yield {
+            "done": True,
+            "success": False,
+            "error": "no speech found",
+            "status": 422,
+        }
+        return
+
+    certain = bool(result.pieces) and bool(result.applied or result.details.get("sure"))
+    pieces = known
+    if certain:
+        for piece in result.pieces:
+            pieces = merge(pieces, piece)
+        _sync_maps[key] = pieces
+    here = nearest(pieces, position)
+    yield {
+        "done": True,
+        "success": True,
+        **result.to_dict(),
+        "pieces": [p.to_dict() for p in pieces],
+        "offset": round(here.offset, 2) if here else 0.0,
+        "scale": round(here.scale, 6) if here else 1.0,
+        "applied": any(p.offset or p.scale != 1.0 for p in pieces),
+        "certain": certain,
+        "changed": pieces != known,
+    }
 
 
-SYNC_WINDOW = 30  # same grid as the player's AI subtitles, so transcripts are shared
+def _transcript(svc, url, start, audio_track):
+    """(words with their times, spoken language) of [start, start + SYNC_WINDOW)."""
+    key = (url, start, audio_track)
+    cached = _heard.get(key)
+    if cached is not None:
+        return cached
+    clip = max(0.0, start - OVERLAP)  # whole words at the edges, as for AI subtitles
+    audio = svc.transcriber.extract_audio(
+        url, clip, SYNC_WINDOW + (start - clip) + OVERLAP, audio_track
+    )
+    if len(audio) < 2000:  # nothing decodable here (end of the file)
+        result = ([], None)
+    else:
+        data = svc.transcriber.transcribe(audio)
+        words = [
+            w for w in spoken_words(data, clip) if start <= w[0] < start + SYNC_WINDOW
+        ]
+        result = (words, _language_code(str(data.get("language") or "")) or None)
+    _heard[key] = result
+    return result
 
 
 def _sync_by_text(svc, url, cues, sub_language, position, audio_track):
-    """Match subtitle text with a transcript of the speech; None = can't decide this way."""
+    """Match subtitle lines with the words said around `position`; None = can't decide this way.
+
+    Three windows (90 s) first; when they aren't enough, two more.
+    """
     first = int(max(0.0, position - 45) // SYNC_WINDOW)
-    lines, spoken = [], None
-    for rounds in ((first, first + 1, first + 2), (first + 3, first - 1)):
-        for k in rounds:
-            if k < 0:
-                continue
-            window = svc.transcriber.window(
-                url, k * SYNC_WINDOW, SYNC_WINDOW, audio_track=audio_track
-            )
-            spoken = spoken or window.get("language")
-            lines += [(x["start"], x["end"], x["text"]) for x in window["lines"]]
+    plan = [k for k in (first, first + 1, first + 2, first + 3, first - 1) if k >= 0]
+    words, spoken = [], None
+    for n, k in enumerate(plan, 1):
+        yield {"stage": "listening", "step": n, "steps": len(plan)}
+        heard, language = _transcript(svc, url, k * SYNC_WINDOW, audio_track)
+        spoken = spoken or language
         if spoken and sub_language and spoken != sub_language:
             return None  # other language: only the timing of speech can help
-        result = align_text(cues, sorted(lines))
+        words += heard
+        if n < 3:
+            continue
+        yield {"stage": "matching"}
+        result = fit_pairs(match_words(cues, words))
         if result.details.get("sure"):
             return result
     return None
@@ -527,19 +621,23 @@ def _sync_by_text(svc, url, cues, sub_language, position, audio_track):
 def _sync_by_speech(svc, url, cues, position):
     """Lay cues over detected speech; confirmed on a second stretch of the film."""
     start = max(0.0, position - 30)
+    yield {"stage": "listening", "step": 1, "steps": 2}
     speech = svc.transcoder.speech(url, start)
     if not speech:
         return None
+    yield {"stage": "matching"}
     result = align(cues, speech, (start, start + 120))
     if not result.applied:
         return result
     # An earlier stretch is already downloaded; at the very start look ahead instead.
     other = start - 150 if start >= 150 else start + 120
+    yield {"stage": "listening", "step": 2, "steps": 2}
     speech = svc.transcoder.speech(url, other)
     if not speech:
         return replace(
             result, applied=False
         )  # nothing to confirm it with: change nothing
+    yield {"stage": "matching"}
     return confirm(result, align(cues, speech, (other, other + 120)))
 
 

@@ -61,6 +61,7 @@
     <div class="menu-head"><strong>{{ t('subtitles') }}</strong><button class="icon-btn menu-close" type="button" data-close-menu aria-label="{{ t('close') }}"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="subs-options" id="subs-options"></div>
     <button class="tool-btn subs-autosync" id="subs-autosync" type="button">{{ t('sync_by_audio') }}</button>
+    <p class="muted subs-help" id="subs-sync-state" hidden></p>
     <div class="subs-sync">
       <span>{{ t('sync') }}</span>
       <button class="tool-btn" type="button" data-sync="-0.5" aria-label="{{ t('sync_earlier') }}">−0,5 s</button>
@@ -106,6 +107,9 @@
 
   <div class="ai-status" id="ai-status" role="status" hidden>
     <span class="flag flag-badge" aria-hidden="true">AI</span><span id="ai-status-text"></span><span class="ai-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+  </div>
+  <div class="ai-status" id="sync-status" role="status" hidden>
+    <span class="flag flag-badge" aria-hidden="true">CC</span><span id="sync-status-text"></span><span class="ai-dots" id="sync-dots" aria-hidden="true"><i></i><i></i><i></i></span>
   </div>
   <div class="player-toast" id="player-toast" role="status" hidden></div>
 </div>
