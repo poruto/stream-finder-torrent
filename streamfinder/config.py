@@ -95,6 +95,14 @@ IMDB_DB_PATH = os.getenv(
     "IMDB_DB_PATH", os.path.join(BASE_DIR, "cache", "imdb_ratings.sqlite")
 )
 
+# Phone notifications when a new episode of a followed show can be played (Server
+# settings): an ntfy topic URL and/or a Telegram bot. PUBLIC_URL: the app's address in
+# the links (empty = this machine's network address).
+NOTIFY_NTFY_URL = os.getenv("NOTIFY_NTFY_URL", "").strip()
+NOTIFY_TELEGRAM_TOKEN = os.getenv("NOTIFY_TELEGRAM_TOKEN", "").strip()
+NOTIFY_TELEGRAM_CHAT = os.getenv("NOTIFY_TELEGRAM_CHAT", "").strip()
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").strip()
+
 # ffmpeg converts unsupported audio (AC3/DTS...) to AAC; found on PATH when empty
 FFMPEG_PATH = os.getenv("FFMPEG_PATH", "").strip()
 FFPROBE_PATH = os.getenv("FFPROBE_PATH", "").strip()

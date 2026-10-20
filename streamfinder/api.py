@@ -141,7 +141,14 @@ def season(tmdb_id: int, season_number: int):
 def torrents():
     """Body: {tmdb_id, media_type, season?, episode?, runtime?, quality?, hevc?, query?};
     `query` = free text, quality "saver" = smallest good version, `hevc` = the browser decodes HEVC."""
-    body = _body()
+    query = search_query(_body())
+    if query is None:
+        return jsonify(success=False, error=t("err_missing_query")), 400
+    return jsonify(success=True, **services().torrents.search(query))
+
+
+def search_query(body: dict) -> SearchQuery | None:
+    """The torrent search for a /torrents body (also used by the new-episode notifier)."""
     media_type = _media_type(body.get("media_type"))
     tmdb_id = _int(body.get("tmdb_id"))
     free_text = (body.get("query") or "").strip()
@@ -173,17 +180,17 @@ def torrents():
         or (data.get("episode_run_time") or [None])[0],
     )
     if free_text:
-        query = SearchQuery(
+        return SearchQuery(
             title=free_text, titles=[free_text], free_text=True, **common
         )
-    elif tmdb_id:
+    if tmdb_id:
         titles = match_titles(data)
         title = data.get("english_title") or titles[0]
         local = [data.get("czech_title")]
         original = data.get("original_title") or data.get("original_name")
         if data.get("original_language") in ("cs", "sk"):
             local.append(original)
-        query = SearchQuery(
+        return SearchQuery(
             title=title,
             titles=titles,
             year=year_of(data),
@@ -198,9 +205,7 @@ def torrents():
             else [],
             **common,
         )
-    else:
-        return jsonify(success=False, error=t("err_missing_query")), 400
-    return jsonify(success=True, **services().torrents.search(query))
+    return None
 
 
 def _search_titles(titles: list[str | None], main: str) -> list[str]:
@@ -296,7 +301,9 @@ def preload():
 
     def warm_up():
         try:
-            file = select_video_file(torrserver.files(info_hash, wait=60), season, episode)
+            file = select_video_file(
+                torrserver.files(info_hash, wait=60), season, episode
+            )
             if file is not None:
                 torrserver.preload(info_hash, file)
         except (TorrServerError, requests.RequestException) as e:

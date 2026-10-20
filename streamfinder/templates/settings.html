@@ -258,6 +258,27 @@
           <p class="key-message" aria-live="polite"></p>
         </form>
 
+        <form class="key-form" id="notify-form">
+          <div class="key-head"><strong>{{ t('notify_heading') }}</strong><span class="key-state" id="notify-state"></span></div>
+          <p class="muted">{{ t('notify_help', link='<a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>') | safe }}</p>
+          <div class="key-row">
+            <label class="sr-only" for="notify-ntfy">ntfy</label>
+            <input id="notify-ntfy" name="ntfy_url" type="url" autocomplete="off" spellcheck="false" placeholder="https://ntfy.sh/{{ t('notify_topic_placeholder') }}">
+          </div>
+          <div class="key-row">
+            <label class="sr-only" for="notify-tg-token">Telegram bot token</label>
+            <input id="notify-tg-token" name="telegram_token" type="password" autocomplete="off" spellcheck="false" placeholder="{{ t('notify_telegram_token') }}">
+            <label class="sr-only" for="notify-tg-chat">Telegram chat id</label>
+            <input id="notify-tg-chat" name="telegram_chat" type="text" autocomplete="off" spellcheck="false" placeholder="{{ t('notify_telegram_chat') }}">
+          </div>
+          <div class="key-row">
+            <button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button>
+            <button class="btn btn-ghost" type="button" id="notify-test">{{ t('notify_test') }}</button>
+            <button class="key-remove" type="button" id="notify-remove" hidden>{{ t('notify_remove') }}</button>
+          </div>
+          <p class="key-message" id="notify-message" aria-live="polite"></p>
+        </form>
+
         <form class="key-form" id="admin-credentials">
           <div class="key-head"><strong>{{ t('admin_account') }}</strong></div>
           <div class="key-row">
@@ -280,4 +301,7 @@
     </section>
     </details>
   </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ asset('js/notify.js') }}" defer></script>
 {% endblock %}

@@ -30,6 +30,9 @@ def create_app(testing: bool = False) -> Flask:
     ):
         services.imdb.start()
         services.apply_network_later()  # upload limit / read-ahead from Server settings
+        from . import notify
+
+        notify.start(app)  # new-episode notifications (when a channel is set)
     app.extensions["streamfinder"] = services
 
     from .api import api
@@ -41,9 +44,11 @@ def create_app(testing: bool = False) -> Flask:
     app.register_blueprint(api)
     app.register_blueprint(shared)
     app.register_blueprint(library)
+    from .notify import notify as notify_bp
     from .upcoming import upcoming_bp
 
     app.register_blueprint(upcoming_bp)
+    app.register_blueprint(notify_bp)
 
     # Globals (not a context processor) so that imported macros can translate too.
     app.jinja_env.globals.update(
