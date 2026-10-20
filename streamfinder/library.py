@@ -88,8 +88,13 @@ def overview():
             "cache": folder_size(cache),
             "whisper": folder_size(_whisper_models()),
         },
-        free=shutil.disk_usage(cache if os.path.isdir(cache) else config.BASE_DIR).free,
+        **_disk(cache),
     )
+
+
+def _disk(folder: str) -> dict:
+    usage = shutil.disk_usage(folder if os.path.isdir(folder) else config.BASE_DIR)
+    return {"free": usage.free, "disk_total": usage.total, "disk_used": usage.used}
 
 
 @library.route("/api/library/remove", methods=["POST"])

@@ -56,6 +56,9 @@ def create_app(testing: bool = False) -> Flask:
 
     app.register_blueprint(upcoming_bp)
     app.register_blueprint(notify_bp)
+    from .health import health
+
+    app.register_blueprint(health)
 
     # Globals (not a context processor) so that imported macros can translate too.
     app.jinja_env.globals.update(

@@ -146,6 +146,7 @@ body:not(.has-hero) .nav {
   gap: clamp(12px, 2vw, 22px);
 }
 .nav-links a {
+  white-space: nowrap;
   color: var(--text-2);
   font-size: 15px;
   font-weight: 500;
@@ -1283,6 +1284,297 @@ select option:checked {
 .calendar-tag.is-digital {
   background: var(--good);
   color: #000;
+}
+
+/* Service status: every check, grouped */
+.status-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+.status-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.health {
+  display: grid;
+  gap: 24px;
+}
+.health-group h2 {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.health .status-list li {
+  align-items: center;
+}
+.health .status-list .dot {
+  margin-top: 0;
+}
+.health .status-list li > div {
+  flex: 1;
+  min-width: 0;
+}
+.health .status-list p {
+  overflow-wrap: anywhere;
+}
+.status-list li[data-state="ok"] .dot {
+  background: var(--good);
+}
+.status-list li[data-state="warn"] .dot {
+  background: var(--ok);
+}
+.status-list li[data-state="fail"] .dot {
+  background: var(--bad);
+}
+.status-list li[data-state="off"] .dot {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+.status-list li[data-state="off"] strong {
+  color: var(--text-2);
+}
+.status-list li[data-state="fail"] {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.status-ms {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+/* Status page tabs and the Storage overview */
+.page-status {
+  max-width: 1180px;
+}
+@media (min-width: 900px) {
+  /* Wide screens: the check groups and the disk/cache cards side by side */
+  .health {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  #panel-storage:not([hidden]) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    align-items: start;
+  }
+  #panel-storage > #library-summary,
+  #panel-storage > #library-actions {
+    grid-column: 1 / -1;
+  }
+}
+.status-tabs {
+  margin: 0 0 20px;
+}
+.status-tabs .chip {
+  min-height: 40px;
+}
+.status-tabs .chip[aria-selected="true"] {
+  background: var(--text);
+  color: #000;
+}
+.status-panel > .status-tools {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.storage-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+.storage-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.storage-card-head h2 {
+  font-size: 17px;
+}
+.storage-card-head strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.storage-bar {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.storage-bar span {
+  min-width: 2px;
+}
+.storage-bar-other {
+  background: #8d99ae;
+}
+.storage-bar-app {
+  background: var(--brand);
+}
+.storage-bar-free {
+  background: var(--surface-2);
+}
+.storage-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.storage-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.storage-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.storage-legend i.storage-bar-free {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.storage-legend strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.storage-parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.storage-parts li {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.storage-parts strong {
+  min-width: 4.5rem;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.storage-part-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.storage-part-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+.storage-torrents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 14px 12px;
+}
+.storage-torrents li {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+.storage-torrents img,
+.storage-torrents .library-noposter {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.storage-torrents li.is-playing img {
+  box-shadow: 0 0 0 2px var(--good);
+}
+.storage-torrents strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.25;
+}
+.storage-torrents small {
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.storage-playing {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--good);
+  color: #000;
+  font-size: 11px;
+  font-weight: 800;
+}
+.storage-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.storage-torrents li:hover .storage-remove,
+.storage-remove:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .storage-remove {
+    opacity: 1;
+  }
+}
+@media (max-width: 560px) {
+  .storage-parts li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .storage-part-bar {
+    grid-column: 1 / -1;
+    order: 3;
+  }
 }
 
 /* Storage on the Status page */

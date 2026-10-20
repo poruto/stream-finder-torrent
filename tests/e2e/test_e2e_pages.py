@@ -124,13 +124,24 @@ def test_status_page_lists_services_and_storage(page, torrserver):
     torrserver.added[fakes.MOVIE_HASH] = {"title": "Test Movie", "poster": ""}
     page.login_admin()
     page.open("/status")
-    first = page.locator(".status-list li").first
-    assert first.get_attribute("data-ok") == "yes"  # TorrServer answers /echo
-    assert "FakeIndex" in page.locator(".status-list").inner_text()
+    assert page.locator("#tab-services").get_attribute("aria-selected") == "true"
+    torrserver = page.locator('#health [data-check="torrserver"]')
+    torrserver.wait_for(timeout=20_000)
+    assert torrserver.get_attribute("data-state") == "ok"  # TorrServer answers /echo
+    assert "FakeIndex" in page.locator("#health").inner_text()
     page.wait_for_function(
         "document.querySelectorAll('#library-list li').length > 0", timeout=10_000
     )
+    page.click("#tab-storage")
+    assert (
+        page.locator("#panel-storage").is_visible()
+        and page.locator("#health").is_hidden()
+    )
     assert "Test Movie" in page.locator("#library-list").inner_text()
+    assert (
+        page.locator("#storage-bar span").count() == 3
+    )  # other files, StreamFinder, free
+    assert page.url.endswith("/status#storage")
 
 
 def test_backup_downloads_and_restores(page, tmp_path, monkeypatch):
@@ -144,7 +155,7 @@ def test_backup_downloads_and_restores(page, tmp_path, monkeypatch):
         {"progress": {"movie:1": {"position": 60, "updated": 100}}, "list": {}},
     )
     page.login_admin()
-    page.open("/status")
+    page.open("/status#backup")  # the address opens the Backup tab
     page.check("#backup-keys")
     assert page.get_attribute("#backup-download", "href") == "/api/backup?keys=1"
     page.uncheck("#backup-keys")

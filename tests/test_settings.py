@@ -317,6 +317,7 @@ def test_keys_built_at_runtime_exist(prefix, suffixes):
 
 # Keys put together at runtime, which no scan for a quoted key finds.
 RUNTIME_KEYS = [
+    r"health_group_\w+",  # health.py: t(f"health_group_{g}")
     r"sort_\w+",  # browse.html: t('sort_' ~ key)
     r"lang_\w+",  # browse.html: t('lang_' ~ code); player.js: `lang_${kind}`
     r"quality_\w+",  # settings.html, _player.html: t('quality_' ~ value [~ '_text'])
@@ -386,7 +387,7 @@ def test_pages_send_the_keys_the_scripts_use():
     assert sorted(k for k in referenced if k in EN and k not in sent) == []
     # Keys the scripts get from elsewhere: the library's list, the server's notice.
     for key in (
-        "library_cache",
+        "library_cache_other",
         "library_whisper",
         "pick_recommended",
         *i18n.JS_DYNAMIC_KEYS,

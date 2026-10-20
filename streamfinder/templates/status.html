@@ -1,78 +1,83 @@
 {% extends "base.html" %}
 {% block title %}{{ t('status_title') }} – StreamFinder{% endblock %}
 {% block content %}
-  <div class="page page-narrow">
+  <div class="page page-status">
     <header class="page-head"><h1>{{ t('status_title') }}</h1></header>
-    <ul class="status-list">
-      <li data-ok="{{ 'yes' if torrserver_online else 'no' }}">
-        <span class="dot" aria-hidden="true"></span>
-        <div>
-          <strong>TorrServer</strong>
-          <p>{{ t('running') if torrserver_online else t('not_running') }} <span class="muted">{{ torrserver_url }}</span></p>
-        </div>
-      </li>
-      {% for p in providers %}
-      <li data-ok="{{ 'yes' if p.available else 'no' }}">
-        <span class="dot" aria-hidden="true"></span>
-        <div>
-          <strong>{{ p.name }}</strong>
-          <p>{{ t('responding') if p.available else t('not_responding') }} <span class="muted">{{ p.url }}</span></p>
-        </div>
-      </li>
-      {% endfor %}
-      <li data-ok="{{ 'yes' if imdb_ready else 'wait' }}">
-        <span class="dot" aria-hidden="true"></span>
-        <div>
-          <strong>{{ t('imdb_ratings') }}</strong>
-          <p>{{ t('imdb_ready', n='{:,}'.format(imdb_count).replace(',', ' ')) if imdb_ready else t('imdb_loading') }}</p>
-        </div>
-      </li>
-      <li data-ok="yes">
-        <span class="dot" aria-hidden="true"></span>
-        <div>
-          <strong>{{ t('subtitles') }}</strong>
-          <p>
-            {{ t('subtitle_languages', list=subtitles.language_names.values() | join(', ')) }}
-            {{ t('opensubtitles_api_on') if subtitles.opensubtitles_api else t('opensubtitles_api_off') }}
-          </p>
-        </div>
-      </li>
-    </ul>
 
     {% if is_admin %}
-    <section class="library" id="library" aria-labelledby="library-title">
-      <header class="library-head">
-        <h2 id="library-title">{{ t('library_title') }}</h2>
-        <p class="muted" id="library-summary">{{ t('library_loading') }}</p>
-      </header>
-      <ul class="library-disk" id="library-disk" hidden></ul>
-      <div class="library-actions" id="library-actions" hidden>
-        <button class="btn btn-ghost" type="button" id="library-clear-subs">{{ t('library_clear_subs') }}</button>
-        <button class="btn btn-ghost" type="button" id="library-remove-all">{{ t('library_remove_all') }}</button>
+    <div class="chips status-tabs" role="tablist" aria-label="{{ t('status_title') }}">
+      <button class="chip" type="button" role="tab" id="tab-services" aria-controls="panel-services" aria-selected="true">{{ t('status_tab_services') }}</button>
+      <button class="chip" type="button" role="tab" id="tab-storage" aria-controls="panel-storage" aria-selected="false">{{ t('library_title') }}</button>
+      <button class="chip" type="button" role="tab" id="tab-backup" aria-controls="panel-backup" aria-selected="false">{{ t('backup_title') }}</button>
+    </div>
+    {% endif %}
+
+    <section class="status-panel" id="panel-services" role="tabpanel" aria-labelledby="tab-services">
+      <div class="status-tools">
+        <p class="muted" id="health-summary" aria-live="polite">{{ t('health_checking') }}</p>
+        <button class="btn btn-ghost" type="button" id="health-refresh">{{ t('health_check_again') }}</button>
       </div>
-      <ul class="library-list" id="library-list"></ul>
+      <div class="health" id="health" aria-busy="true"></div>
+      {% if not is_admin %}<p class="muted library">{{ t('library_login') }}</p>{% endif %}
     </section>
-    <section class="library" id="backup" aria-labelledby="backup-title">
-      <header class="library-head">
-        <h2 id="backup-title">{{ t('backup_title') }}</h2>
+
+    {% if is_admin %}
+    <section class="status-panel library" id="panel-storage" role="tabpanel" aria-labelledby="tab-storage" hidden>
+      <p class="muted" id="library-summary" aria-live="polite">{{ t('library_loading') }}</p>
+
+      <div class="storage-card" id="storage-disk" hidden>
+        <div class="storage-card-head">
+          <h2>{{ t('library_disk_title') }}</h2>
+          <strong id="storage-free"></strong>
+        </div>
+        <div class="storage-bar" id="storage-bar" role="img"></div>
+        <ul class="storage-legend" id="storage-legend"></ul>
+      </div>
+
+      <div class="storage-card" id="storage-cache" hidden>
+        <div class="storage-card-head">
+          <h2>{{ t('library_cache_title') }}</h2>
+          <strong id="storage-cache-total"></strong>
+        </div>
+        <ul class="storage-parts" id="library-disk"></ul>
+        <div class="library-actions">
+          <button class="btn btn-ghost" type="button" id="library-clear-subs">{{ t('library_clear_subs') }}</button>
+        </div>
+      </div>
+
+      <div class="storage-card" id="library-actions">
+        <div class="storage-card-head">
+          <h2>{{ t('library_torrents_title') }}</h2>
+          <strong id="storage-torrents-total"></strong>
+        </div>
+        <ul class="storage-torrents" id="library-list"></ul>
+        <p class="muted" id="storage-torrents-empty" hidden>{{ t('library_empty') }}</p>
+        <div class="library-actions">
+          <button class="btn btn-ghost" type="button" id="storage-show-all" hidden></button>
+          <button class="btn btn-ghost" type="button" id="library-remove-all">{{ t('library_remove_all') }}</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="status-panel library" id="panel-backup" role="tabpanel" aria-labelledby="tab-backup" hidden>
+      <div class="storage-card">
         <p class="muted">{{ t('backup_help') }}</p>
-      </header>
-      <div class="library-actions">
-        <a class="btn btn-ghost" id="backup-download" href="{{ url_for('library.backup') }}" download>{{ t('backup_download') }}</a>
-        <button class="btn btn-ghost" type="button" id="backup-restore">{{ t('backup_restore') }}</button>
-        <input type="file" id="backup-file" accept=".json,application/json" hidden>
+        <div class="library-actions">
+          <a class="btn btn-ghost" id="backup-download" href="{{ url_for('library.backup') }}" download>{{ t('backup_download') }}</a>
+          <button class="btn btn-ghost" type="button" id="backup-restore">{{ t('backup_restore') }}</button>
+          <input type="file" id="backup-file" accept=".json,application/json" hidden>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="backup-keys">
+          <span>{{ t('backup_keys') }}</span>
+        </label>
+        <p class="muted" id="backup-message" role="status"></p>
       </div>
-      <label class="toggle">
-        <input type="checkbox" id="backup-keys">
-        <span>{{ t('backup_keys') }}</span>
-      </label>
-      <p class="muted" id="backup-message" role="status"></p>
     </section>
-    {% else %}
-    <p class="muted library">{{ t('library_login') }}</p>
     {% endif %}
   </div>
 {% endblock %}
 {% block scripts %}
+  <script src="{{ asset('js/status.js') }}" defer></script>
   {% if is_admin %}<script src="{{ asset('js/library.js') }}" defer></script>{% endif %}
 {% endblock %}

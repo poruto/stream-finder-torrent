@@ -575,17 +575,8 @@ def settings():
 
 @web.route("/status")
 def status():
-    svc = services()
-    return render_template(
-        "status.html",
-        torrserver_online=svc.torrserver.is_online(),
-        torrserver_url=svc.torrserver.base_url,
-        providers=svc.torrents.provider_status(),
-        subtitles=svc.subtitles.status(),
-        imdb_ready=svc.imdb.ready,
-        imdb_count=svc.imdb.count if svc.imdb.ready else 0,
-        is_admin=auth.is_admin(),
-    )
+    # The checks themselves come from /api/health (health.py) once the page is open.
+    return render_template("status.html", is_admin=auth.is_admin())
 
 
 # -- old URLs, kept so bookmarks keep working ----------------------------------

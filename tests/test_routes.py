@@ -318,7 +318,9 @@ def test_show_detail_page_with_seasons(client):
 def test_settings_and_status_pages(client):
     assert client.get("/settings").status_code == 200
     html = client.get("/status").get_data(as_text=True)
-    assert "Fake" in html and "https://fake.example" in html
+    assert (
+        'id="health"' in html and "js/status.js" in html
+    )  # the checks come from /api/health
 
 
 def test_pages_need_a_tmdb_key_first(client, monkeypatch):
