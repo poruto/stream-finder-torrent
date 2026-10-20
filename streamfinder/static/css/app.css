@@ -2351,6 +2351,7 @@ select option:checked {
   gap: 28px;
 }
 .setting {
+  min-width: 0; /* a fieldset is as wide as its longest content otherwise */
   margin: 0;
   padding: 0;
   border: 0;
@@ -2404,9 +2405,10 @@ select option:checked {
 }
 .setting-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 16px;
   border-radius: 8px;
   background: var(--surface);
@@ -2659,6 +2661,36 @@ select option:checked {
     grid-column: 1;
     justify-self: start;
   }
+}
+
+/* Settings on a phone: label above its control, controls full width. */
+@media (max-width: 600px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .setting-row select,
+  .setting-row .choice-row {
+    width: 100%;
+    max-width: 100%;
+  }
+  .choice {
+    padding: 12px;
+  }
+  .key-row .btn {
+    flex: 1 1 100%;
+  }
+  .admin-panel > summary,
+  .setting.keys {
+    padding: 14px;
+  }
+  .key-form {
+    padding: 14px;
+  }
+}
+.setting-row select {
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* Touch screens: phones change volume with their own buttons. */
