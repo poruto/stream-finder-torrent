@@ -1,6 +1,7 @@
 """StreamFinder: browse TMDB, pick the best torrent automatically and stream it
 through TorrServer with automatically matched subtitles."""
 
+import json
 import logging
 import os
 
@@ -79,6 +80,39 @@ def create_app(testing: bool = False) -> Flask:
         path = os.path.join(app.static_folder, filename)
         version = int(os.path.getmtime(path)) if os.path.exists(path) else 0
         return url_for("static", filename=filename, v=version)
+
+    @app.get("/sw.js")
+    def service_worker():
+        """The offline cache (static/sw.js) from the root, so every page is in its scope.
+
+        Filled in here: the app version (a cache of its own, so a release replaces the old
+        one) and the app shell's URLs exactly as the pages ask for them.
+        """
+        static = app.static_folder
+        shell = [url_for("static", filename="manifest.json")]
+        # CSS and scripts carry ?v=<mtime> (asset()); the icons are linked without it.
+        for folder, versioned in (("css", True), ("js", True), ("icons", False)):
+            for root, _, files in sorted(os.walk(os.path.join(static, folder))):
+                for name in sorted(files):
+                    path = os.path.relpath(os.path.join(root, name), static)
+                    path = path.replace(os.sep, "/")
+                    shell.append(
+                        asset(path) if versioned else url_for("static", filename=path)
+                    )
+        with open(os.path.join(static, "sw.js"), encoding="utf-8") as f:
+            script = f.read()
+        script = script.replace(
+            'const VERSION = "dev";',
+            f"const VERSION = {json.dumps(version.VERSION)};",
+            1,
+        )
+        script = script.replace(
+            "const SHELL = [];", f"const SHELL = {json.dumps(shell)};", 1
+        )
+        response = app.response_class(script, mimetype="text/javascript")
+        response.headers["Service-Worker-Allowed"] = "/"
+        response.cache_control.no_cache = True
+        return response
 
     @app.errorhandler(TMDBError)
     def tmdb_unavailable(error):

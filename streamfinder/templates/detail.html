@@ -96,5 +96,11 @@
   {% include '_player.html' %}
 {% endblock %}
 {% block scripts %}
-  <script src="{{ asset('js/player.js') }}" defer></script>
+  {# The player: classic scripts sharing SF.player, in this order (see player/core.js) #}
+  <script src="{{ asset('js/player/core.js') }}" defer></script>
+  <script src="{{ asset('js/player/controls.js') }}" defer></script>
+  <script src="{{ asset('js/player/subtitles.js') }}" defer></script>
+  <script src="{{ asset('js/player/ai-subtitles.js') }}" defer></script>
+  <script src="{{ asset('js/player/sheet.js') }}" defer></script>
+  <script src="{{ asset('js/player/page.js') }}" defer></script>
 {% endblock %}

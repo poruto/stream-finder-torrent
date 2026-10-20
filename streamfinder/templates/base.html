@@ -79,5 +79,12 @@
   <script src="{{ asset('js/app.js') }}" defer></script>
   <script src="{{ asset('js/profiles.js') }}" defer></script>
   {% block scripts %}{% endblock %}
+  <script>
+    // Offline copy of the app shell (static/sw.js). Browsers allow service workers only in
+    // a secure context (https or localhost): on a plain-http LAN address there is none.
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(() => {}));
+    }
+  </script>
 </body>
 </html>

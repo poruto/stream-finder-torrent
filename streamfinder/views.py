@@ -152,6 +152,23 @@ def backdrop_srcset(path: str | None) -> str | None:
     return ", ".join(f"{image_url(path, size)} {width}w" for size, width in _BACKDROP_WIDTHS)
 
 
+# Widths offered for posters: rows and grids are a third of a phone's width and up to
+# 210px on big screens (`sizes` in _macros.html and app.js, after app.css .row-track/.grid).
+_POSTER_WIDTHS = (185, 342, 500)
+_POSTER_SIZE_RE = re.compile(r"/t/p/w\d+/")
+
+
+@web.app_template_global()
+def poster_srcset(url: str | None) -> str | None:
+    """`srcset` for a TMDB poster URL (any size), so phones and TVs fetch one that fits."""
+    if not url or not _POSTER_SIZE_RE.search(url):
+        return None
+    return ", ".join(
+        f"{_POSTER_SIZE_RE.sub(f'/t/p/w{width}/', url, count=1)} {width}w"
+        for width in _POSTER_WIDTHS
+    )
+
+
 def card(
     result: dict[str, Any], media_type: str | None = None
 ) -> dict[str, Any] | None:

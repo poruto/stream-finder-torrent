@@ -275,7 +275,9 @@ def bench_pages(cache_dir: str):
     html = client.get("/").get_data(as_text=True)
     start = html.index('<script id="i18n"')
     size("bytes.i18n_json_in_page", len(html[start : html.index("</script>", start)]))
-    for asset in ("css/app.css", "js/app.js", "js/player.js"):
+    player_dir = os.path.join(app.static_folder, "js", "player")
+    player = sorted(f"js/player/{name}" for name in os.listdir(player_dir))
+    for asset in ("css/app.css", "js/app.js", *player):
         size(
             f"bytes.static.{asset}",
             len(client.get(f"/static/{asset}", headers=gz).data),

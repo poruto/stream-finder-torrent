@@ -1,9 +1,12 @@
 """Pages and JSON API through the Flask test client, with TMDB and TorrServer faked."""
 
+import json
+import re
+
 import pytest
 import requests
 
-from streamfinder import auth, config, create_app, shared
+from streamfinder import auth, config, create_app, shared, version, views
 from streamfinder.tmdb import TMDBError
 from streamfinder.torrserver import TorrentFile, TorrServerError
 
@@ -346,6 +349,50 @@ def test_tmdb_down_is_a_502_page_and_json(client, svc):
 def test_static_files_are_cached_for_a_year_when_versioned(client):
     assert client.get("/static/css/app.css?v=123").cache_control.max_age == 31536000
     assert client.get("/static/css/app.css").cache_control.max_age == 300
+
+
+def test_service_worker_is_served_from_the_root_with_this_version(client, monkeypatch):
+    monkeypatch.setattr(config, "TMDB_API_KEY", "")  # needed before the setup too
+    response = client.get("/sw.js")
+    assert response.status_code == 200 and response.mimetype == "text/javascript"
+    assert response.headers["Service-Worker-Allowed"] == "/"
+    assert response.cache_control.no_cache  # a new version is noticed at once
+    script = response.get_data(as_text=True)
+    assert f"const VERSION = {json.dumps(version.VERSION)};" in script
+    shell = json.loads(re.search(r"const SHELL = (\[.*?\]);", script).group(1))
+    # The app shell, as the pages link it: CSS and scripts with ?v=, icons without.
+    assert any(re.fullmatch(r"/static/css/app\.css\?v=\d+", url) for url in shell)
+    for name in ("app", "profiles", "player/core", "player/page", "calendar"):
+        assert any(url.startswith(f"/static/js/{name}.js?v=") for url in shell), name
+    assert "/static/manifest.json" in shell
+    assert "/static/icons/icon-192.png" in shell
+    assert not [url for url in shell if "/api/" in url or url.endswith(".vtt")]
+
+
+def test_pages_register_the_service_worker_only_in_a_secure_context(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'navigator.serviceWorker.register("/sw.js")' in html
+    assert '"serviceWorker" in navigator && window.isSecureContext' in html
+
+
+def test_poster_srcset_offers_three_tmdb_sizes():
+    base = "https://image.tmdb.org/t/p"
+    assert views.poster_srcset(f"{base}/w500/p.jpg") == (
+        f"{base}/w185/p.jpg 185w, {base}/w342/p.jpg 342w, {base}/w500/p.jpg 500w"
+    )
+    assert views.poster_srcset(None) is None
+    assert views.poster_srcset("/static/icons/icon-192.png") is None
+
+
+def test_posters_in_rows_and_grids_have_a_srcset(client):
+    for path in ("/", "/movies"):
+        html = client.get(path).get_data(as_text=True)
+        images = re.findall(r'<a class="poster[^"]*"[^>]*>\s*<img [^>]*>', html)
+        assert images, path
+        for image in images:
+            poster = re.search(r'src="([^"]+)"', image).group(1)
+            assert f'srcset="{views.poster_srcset(poster)}"' in image, image
+            assert 'sizes="(max-width: 760px) 31vw, ' in image, image
 
 
 # -- language switch and old URLs --------------------------------------------------------------

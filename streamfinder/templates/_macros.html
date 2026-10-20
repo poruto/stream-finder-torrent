@@ -1,6 +1,7 @@
 {% macro poster(item, eager=false) -%}
+{%- set srcset = poster_srcset(item.poster) -%}
 <a class="poster{% if item.current %} is-current{% endif %}" href="{{ item.url }}" data-id="{{ item.id }}" data-type="{{ item.type }}"{% if item.current %} aria-current="page"{% endif %}>
-  <img src="{{ item.poster }}" alt="" {% if not eager %}loading="lazy"{% endif %} decoding="async" width="342" height="513">
+  <img src="{{ item.poster }}"{% if srcset %} srcset="{{ srcset }}" sizes="(max-width: 760px) 31vw, (max-width: 1400px) 15vw, 210px"{% endif %} alt="" {% if not eager %}loading="lazy"{% endif %} decoding="async" width="342" height="513">
   {% if item.imdb %}<span class="poster-badge" title="IMDb">IMDb {{ item.imdb }}</span>{% endif %}
   {% if item.coming %}<span class="coming-badge">{{ item.coming }}</span>{% endif %}
   <span class="poster-meta">

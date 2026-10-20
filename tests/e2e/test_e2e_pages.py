@@ -4,6 +4,8 @@ import time
 
 import pytest
 
+from streamfinder import version
+
 from . import fakes
 
 pytest.importorskip("playwright.sync_api")
@@ -212,3 +214,67 @@ def test_no_console_errors_for_visitors(page, path, endpoint):
     page.open(path)
     page.wait_for_load_state("networkidle")
     assert not page.errors, "\n".join(page.errors)
+
+
+CACHED_URLS = """async () => {
+    const cache = await caches.open("streamfinder-" + VERSION);
+    return (await cache.keys()).map((request) => request.url);
+}"""
+
+
+def test_service_worker_keeps_the_app_shell_and_the_pages_still_work(page):
+    page.open("/")
+    # localhost is a secure context: the worker registers and takes the pages from the root.
+    scope = page.evaluate("navigator.serviceWorker.ready.then((r) => r.scope)")
+    assert scope == page.base_url + "/"
+    page.wait_for_function("navigator.serviceWorker.controller !== null")
+    assert page.evaluate("caches.keys()") == [f"streamfinder-{version.VERSION}"]
+    shell = page.evaluate(CACHED_URLS.replace("VERSION", repr(version.VERSION)))
+    assert any("/static/css/app.css?v=" in url for url in shell)
+    assert any("/static/js/player/core.js?v=" in url for url in shell)
+
+    # With the worker in charge: the home page and a film work as before.
+    page.reload()
+    page.wait_for_load_state("load")
+    assert page.evaluate("navigator.serviceWorker.controller !== null")
+    assert page.locator(".rows section.row[data-row]").count() >= 3
+    page.open(f"/movie/{fakes.MOVIE_ID}")
+    page.wait_for_function("!document.getElementById('play-btn').disabled")
+    page.locator("#versions-btn").click()
+    page.locator("#versions-picks .pick").first.wait_for()
+    urls = page.evaluate(CACHED_URLS.replace("VERSION", repr(version.VERSION)))
+    # The page is kept for offline use; nothing from the API ever is.
+    assert f"{page.base_url}/movie/{fakes.MOVIE_ID}" in urls
+    assert not [url for url in urls if "/api/" in url], urls
+
+
+def _poster_size(page, selector):
+    """The TMDB size (w185/w342/w500) the browser picked from the poster's srcset."""
+    image = page.locator(selector).first
+    image.scroll_into_view_if_needed()
+    page.wait_for_function("img => img.currentSrc", arg=image.element_handle())
+    return image.evaluate("img => img.currentSrc.split('/t/p/')[1].split('/')[0]")
+
+
+@pytest.mark.parametrize("width, size", [(400, "w185"), (1280, "w342")])
+def test_posters_come_in_the_size_that_fits(page, width, size):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.set_storage(
+        {
+            "streamfinder.mylist.v1": [
+                {
+                    "key": f"movie:{fakes.MOVIE_ID}",
+                    "id": fakes.MOVIE_ID,
+                    "type": "movie",
+                    "title": "Test Movie",
+                    "poster": f"https://image.tmdb.org/t/p/w500/poster{fakes.MOVIE_ID}.jpg",
+                    "url": f"/movie/{fakes.MOVIE_ID}",
+                    "added": 1,
+                }
+            ]
+        }
+    )
+    page.open("/")
+    # Rendered on the server (a row) and by app.js (My list, from a stored w500 URL).
+    assert _poster_size(page, '.row[data-row="popular_movies"] .poster img') == size
+    assert _poster_size(page, "#mylist-track .poster img") == size

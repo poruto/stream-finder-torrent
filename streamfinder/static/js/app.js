@@ -648,10 +648,20 @@
   document.querySelectorAll(".row-viewport").forEach(SF.initRow);
 
   // ---------------------------------------------------------- poster markup (JS-rendered grids)
+  // Three TMDB sizes to pick from, and the width a poster takes in a row or grid (app.css
+  // .row-track/.grid, the same as in _macros.html): phones and TVs fetch one that fits.
+  const POSTER_SIZE = /\/t\/p\/w\d+\//;
+  const POSTER_SIZES = "(max-width: 760px) 31vw, (max-width: 1400px) 15vw, 210px";
+  const posterSrcset = (url) =>
+    url && POSTER_SIZE.test(url)
+      ? [185, 342, 500].map((w) => `${url.replace(POSTER_SIZE, `/t/p/w${w}/`)} ${w}w`).join(", ")
+      : null;
   SF.poster = (item) =>
     SF.el("a", { className: "poster", href: item.url, dataset: { id: item.id, type: item.type } }, [
       SF.el("img", {
         src: item.poster,
+        srcset: posterSrcset(item.poster),
+        sizes: POSTER_SIZES,
         alt: "",
         loading: "lazy",
         decoding: "async",

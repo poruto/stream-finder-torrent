@@ -282,7 +282,7 @@ def app(tmp_path, monkeypatch):
     return create_app(testing=True)
 
 
-@pytest.mark.parametrize("asset", ["css/app.css", "js/app.js", "js/player.js"])
+@pytest.mark.parametrize("asset", ["css/app.css", "js/app.js", "js/player/core.js"])
 def test_static_files_gzip_and_answer_304(app, asset):
     c = app.test_client()
     url = f"/static/{asset}?v=1"
