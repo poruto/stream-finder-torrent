@@ -112,38 +112,91 @@
 
   // Watch progress per title: { "<type>:<id>": { title, backdrop, url, season, episode,
   //   position, duration, magnet, fileIndex, updated, episodes: { "1x3": {position, duration} } } }
+  // A removed title stays as { removed: true, updated } so other devices learn about it.
   const progressStore = store("streamfinder.progress.v1", () => ({}));
   SF.progress = {
-    all: () => progressStore.read(),
-    get: (key) => progressStore.read()[key] || null,
+    all: () => Object.fromEntries(Object.entries(progressStore.read()).filter(([, p]) => !p.removed)),
+    get: (key) => {
+      const entry = progressStore.read()[key];
+      return entry && !entry.removed ? entry : null;
+    },
     set(key, value) {
       const data = progressStore.read();
-      data[key] = { ...(data[key] || {}), ...value, updated: Date.now() };
+      const old = data[key]?.removed ? {} : data[key] || {};
+      data[key] = { ...old, ...value, updated: Date.now() };
       progressStore.write(data);
+      syncSoon();
     },
     remove(key) {
       const data = progressStore.read();
-      delete data[key];
+      data[key] = { removed: true, updated: Date.now() };
       progressStore.write(data);
+      syncSoon();
     },
   };
 
-  // My list: [{ key, id, type, title, poster, url, added }]
+  // My list: [{ key, id, type, title, poster, url, added }]; removed keys: { key: time }
   const listStore = store("streamfinder.mylist.v1", () => []);
+  const listRemovedStore = store("streamfinder.mylist.removed.v1", () => ({}));
   SF.myList = {
     all: () => listStore.read(),
     has: (key) => listStore.read().some((i) => i.key === key),
     toggle(item) {
       const items = listStore.read();
       const exists = items.some((i) => i.key === item.key);
+      const removed = listRemovedStore.read();
+      if (exists) removed[item.key] = Date.now();
+      else delete removed[item.key];
+      listRemovedStore.write(removed);
       listStore.write(
         exists
           ? items.filter((i) => i.key !== item.key)
           : [{ ...item, added: Date.now() }, ...items],
       );
+      syncSoon(1000);
       return !exists;
     },
   };
+
+  // ---------------------------------------------------------- shared between devices
+  // Progress and My list are merged with the server's copy (streamfinder/shared.py), so
+  // a film started on the TV continues on the phone. Entry by entry the newer one wins.
+  const newer = (a, b, field) => ((b?.[field] || 0) > (a?.[field] || 0) ? b : a);
+  function mergeShared(remote) {
+    const progress = progressStore.read();
+    for (const [key, entry] of Object.entries(remote.progress || {})) progress[key] = newer(progress[key], entry, "updated");
+    const removed = listRemovedStore.read();
+    for (const [key, when] of Object.entries(remote.listRemoved || {})) removed[key] = Math.max(removed[key] || 0, when);
+    const items = new Map(listStore.read().map((i) => [i.key, i]));
+    for (const item of remote.list || []) items.set(item.key, newer(items.get(item.key), item, "added"));
+    const list = [...items.values()].filter((i) => (i.added || 0) > (removed[i.key] || 0)).sort((a, b) => (b.added || 0) - (a.added || 0));
+    progressStore.write(progress);
+    listRemovedStore.write(removed);
+    listStore.write(list);
+  }
+  const sharedBody = () => ({ progress: progressStore.read(), list: listStore.read(), listRemoved: listRemovedStore.read() });
+  let syncTimer = null;
+  SF.syncShared = async () => {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+    try {
+      // Merged into what is stored now: a change made while the request ran is kept.
+      mergeShared(await SF.api("/api/shared", sharedBody()));
+      document.dispatchEvent(new CustomEvent("sf:shared"));
+    } catch {
+      /* offline or an older server: this device's own copy still works */
+    }
+  };
+  // Not more often than every few seconds while a film saves its position.
+  function syncSoon(delay = 5000) {
+    if (syncTimer === null) syncTimer = setTimeout(SF.syncShared, delay);
+  }
+  addEventListener("pagehide", () => {
+    if (syncTimer === null) return;
+    clearTimeout(syncTimer);
+    navigator.sendBeacon?.("/api/shared", new Blob([JSON.stringify(sharedBody())], { type: "application/json" }));
+  });
+  SF.syncShared();
 
   // Entries saved before the URLs became English (/film/1 -> /movie/1, /serial/1 -> /show/1).
   const englishUrl = (url) =>
@@ -804,8 +857,9 @@
   }
 
   // ---------------------------------------------------------- home: continue watching & my list
+  // Drawn again when another device's progress or list arrives.
   const continueRow = document.getElementById("continue-row");
-  if (continueRow) {
+  function renderContinue() {
     const items = Object.entries(SF.progress.all())
       .filter(
         ([, p]) =>
@@ -814,6 +868,7 @@
       .sort(([, a], [, b]) => b.updated - a.updated)
       .slice(0, 20);
     const track = document.getElementById("continue-track");
+    track.replaceChildren();
     for (const [key, p] of items) {
       const remove = SF.el(
         "button",
@@ -861,11 +916,17 @@
   }
 
   const listRow = document.getElementById("mylist-row");
-  if (listRow) {
+  function renderList() {
     const items = SF.myList.all();
     document
       .getElementById("mylist-track")
       .replaceChildren(...items.map(SF.poster));
     listRow.hidden = !items.length;
   }
+  if (continueRow) renderContinue();
+  if (listRow) renderList();
+  document.addEventListener("sf:shared", () => {
+    if (continueRow) renderContinue();
+    if (listRow) renderList();
+  });
 })();
