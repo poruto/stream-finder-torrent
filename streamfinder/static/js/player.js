@@ -1651,7 +1651,7 @@
         recommended.push(option(active?.id === tr.id, mine, t("subs_translated_from", { lang: languageName(mine), from: languageName(from.language) }), t(`translator_${translatorEngine()}`), pick(tr)));
       }
     }
-    // -- section 1: real subtitles you can download (and their machine translation)
+    // -- real subtitles you can download (and their machine translation), below the AI ones
     const downloads = el("section", { className: "subs-section" }, [
       el("div", { className: "subs-section-head" }, [el("strong", {}, [t("subs_section_downloads")]), el("small", {}, [t("subs_section_downloads_help")])]),
     ]);
@@ -1690,9 +1690,7 @@
     } else {
       downloads.append(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
     }
-    options.push(downloads);
-
-    // -- section 2: AI subtitles written from the audio, translated into a language picked here
+    // -- AI subtitles first: written from the audio, translated into a language picked here written from the audio, translated into a language picked here
     if (state.aiAvailable) {
       const target = settings.aiTarget ?? "en";
       const select = el("select", { className: "subs-ai-target", "aria-label": t("ai_target") }, [
@@ -1719,6 +1717,7 @@
       if (target) section.append(option(active?.id === spoken.id, "", t("subs_ai_original"), t("subs_ai_original_help"), () => applySubtitle(spoken), "AI"));
       options.push(section);
     }
+    options.push(downloads);
     $("subs-options").replaceChildren(...options);
     $("subs-autosync").disabled = !active || active.source === "ai";
   }
