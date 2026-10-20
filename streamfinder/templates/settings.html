@@ -69,8 +69,8 @@
         </div>
         <div class="setting-row">
           <label for="sub-translator">{{ t('translator') }}</label>
-          <select id="sub-translator" name="translator">
-            {% for value in ['google', 'ai'] if value != 'ai' or ai_translate %}<option value="{{ value }}">{{ t('translator_' ~ value) }}</option>{% endfor %}
+          <select id="sub-translator" name="translation">
+            {% for value in ['auto', 'ai', 'google'] if value != 'ai' or ai_translate %}<option value="{{ value }}">{{ t('translator_' ~ value) }}</option>{% endfor %}
           </select>
         </div>
         <p class="muted">{{ t('translator_help') }}</p>

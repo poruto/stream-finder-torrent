@@ -174,7 +174,7 @@
     versionLang: DEFAULTS.lang === "cs" ? "cs" : "any",
     // No subtitles in my language: "translate" others, "ai" from the audio, "other" language as is
     subsMissing: "translate",
-    translator: "google", // or "ai" (needs the AI subtitles key)
+    translation: "auto", // "auto": AI when a Groq/OpenAI key is set, else Google; or "google" / "ai"
     aiTarget: "en", // AI subtitles: translate into this language ("" = as spoken)
     aiVia: "english", // Whisper translates the speech into English, Google into the target; or "direct"
     volume: 1,
@@ -248,7 +248,7 @@
     settingsForm.autoNext.checked = current.autoNext;
     settingsForm.alwaysConvert.checked = current.alwaysConvert;
     settingsForm.subsMissing.value = current.subsMissing;
-    settingsForm.translator.value = current.translator;
+    settingsForm.translation.value = current.translation;
     if (settingsForm.aiTarget) settingsForm.aiTarget.value = current.aiTarget;
     if (settingsForm.aiVia) settingsForm.aiVia.value = current.aiVia === "direct" ? "direct" : "english";
     const saved = document.getElementById("settings-saved");
@@ -263,7 +263,7 @@
         autoNext: settingsForm.autoNext.checked,
         alwaysConvert: settingsForm.alwaysConvert.checked,
         subsMissing: settingsForm.subsMissing.value || "translate",
-        translator: settingsForm.translator.value || "google",
+        translation: settingsForm.translation.value || "auto",
         ...(settingsForm.aiTarget ? { aiTarget: settingsForm.aiTarget.value } : {}),
         ...(settingsForm.aiVia ? { aiVia: settingsForm.aiVia.value } : {}),
       });

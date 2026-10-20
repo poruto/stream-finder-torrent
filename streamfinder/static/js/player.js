@@ -1569,6 +1569,7 @@
       if (current !== state.current) return;
       state.subs = data.candidates;
       state.aiAvailable = Boolean(data.ai);
+      state.translators = data.translators || ["google"];
       subsBtn.disabled = false;
       renderSubsMenu();
       const settings = SF.settings.get();
@@ -1713,7 +1714,7 @@
           el("small", {}, [t("subs_section_ai_help")]),
         ]),
         el("label", { className: "subs-ai-row" }, [el("span", {}, [t("ai_target")]), select]),
-        option(active?.id === ai.id, target, target ? t("subs_ai_into", { lang: languageName(target) }) : t("subs_ai_original"), target ? t("subs_ai_route", { lang: languageName(target) }) : t("subs_ai_original_help"), () => applySubtitle(ai), "AI"),
+        option(active?.id === ai.id, target, target ? t("subs_ai_into", { lang: languageName(target) }) : t("subs_ai_original"), target ? t("subs_ai_route", { lang: languageName(target), engine: t(`engine_${translatorEngine()}`) }) : t("subs_ai_original_help"), () => applySubtitle(ai), "AI"),
       ]);
       if (target) section.append(option(active?.id === spoken.id, "", t("subs_ai_original"), t("subs_ai_original_help"), () => applySubtitle(spoken), "AI"));
       options.push(section);
@@ -1806,7 +1807,11 @@
       return code;
     }
   };
-  const translatorEngine = () => (SF.settings.get().translator === "ai" && state.aiAvailable ? "ai" : "google");
+  // AI translation when the server has a Groq/OpenAI key (and it isn't turned off), else Google.
+  const translatorEngine = () => {
+    const choice = SF.settings.get().translation;
+    return choice !== "google" && (state.translators || []).includes("ai") ? "ai" : "google";
+  };
   const translatedCandidate = (c, target) => ({
     ...c,
     id: `${c.id}|${target}`,
