@@ -316,21 +316,29 @@
   };
 
   const isPhone = window.matchMedia("(hover: none) and (pointer: coarse)");
+  // iPhone Safari has no Fullscreen API: only the video goes full screen, in the system
+  // player. Older iPadOS has it prefixed.
+  const requestFullscreen = playerEl.requestFullscreen || playerEl.webkitRequestFullscreen;
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
       return;
     }
-    playerEl
-      .requestFullscreen?.({ navigationUI: "hide" })
-      .then(() => {
+    if (!requestFullscreen) {
+      video.webkitEnterFullscreen?.();
+      return;
+    }
+    requestFullscreen
+      .call(playerEl, { navigationUI: "hide" })
+      ?.then(() => {
         // Phones: a wide video fills the screen only when turned sideways.
         if (isPhone.matches && video.videoWidth >= video.videoHeight) {
           screen.orientation?.lock?.("landscape").catch(() => {});
         }
       })
-      .catch(() => {});
+      ?.catch(() => {});
   };
+  $("ctl-fullscreen").hidden = !requestFullscreen && !video.webkitEnterFullscreen;
   document.addEventListener("fullscreenchange", () => {
     playerEl.classList.toggle("is-fullscreen", Boolean(document.fullscreenElement));
     if (!document.fullscreenElement) screen.orientation?.unlock?.();
@@ -340,11 +348,59 @@
   $("ctl-back").addEventListener("click", () => skip(-10));
   $("ctl-forward").addEventListener("click", () => skip(10));
   $("ctl-fullscreen").addEventListener("click", toggleFullscreen);
+  // Touch: a tap shows or hides the controls, a double tap on the left or right third
+  // seeks 10 s. A mouse keeps click = play/pause and double click = full screen.
+  let tapWasIdle = false;
+  let lastTap = { time: 0, x: 0 };
+  let tapTimer = null;
+  let lastTouchAt = 0;
+  video.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch") tapWasIdle = playerEl.classList.contains("is-idle");
+  });
+  video.addEventListener("pointerup", (event) => {
+    if (event.pointerType !== "touch") return;
+    lastTouchAt = Date.now();
+    const third = event.offsetX / video.clientWidth;
+    const side = third < 1 / 3 ? -10 : third > 2 / 3 ? 10 : 0;
+    if (side && lastTouchAt - lastTap.time < 300 && Math.abs(event.clientX - lastTap.x) < 60) {
+      clearTimeout(tapTimer);
+      lastTap.time = 0;
+      skip(side);
+      return;
+    }
+    lastTap = { time: lastTouchAt, x: event.clientX };
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {
+      if (anyMenuOpen()) closeMenus();
+      else if (tapWasIdle) wakeControls();
+      else if (!video.paused) playerEl.classList.add("is-idle");
+    }, 250);
+  });
   video.addEventListener("click", () => {
+    if (Date.now() - lastTouchAt < 600) return; // a touch, handled above
     if (anyMenuOpen()) closeMenus();
     else togglePlay();
   });
-  video.addEventListener("dblclick", toggleFullscreen);
+  video.addEventListener("dblclick", () => {
+    if (Date.now() - lastTouchAt >= 600) toggleFullscreen();
+  });
+
+  // Swipe down on the picture closes the player (like closing a photo on a phone).
+  let swipe = null;
+  playerEl.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event.touches[0];
+      const free = event.touches.length === 1 && !anyMenuOpen() && !event.target.closest(".player-controls, .player-menu");
+      swipe = free ? { x: touch.clientX, y: touch.clientY } : null;
+    },
+    { passive: true },
+  );
+  playerEl.addEventListener("touchend", (event) => {
+    const touch = event.changedTouches[0];
+    if (swipe && touch && touch.clientY - swipe.y > 120 && Math.abs(touch.clientX - swipe.x) < 80) closePlayer();
+    swipe = null;
+  });
 
   // Picture-in-picture and casting (Chromecast / AirPlay) when the browser supports them
   const pipBtn = $("ctl-pip");

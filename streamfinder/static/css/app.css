@@ -1635,6 +1635,7 @@ select option:checked {
   padding: 16px 0;
 }
 .player video {
+  touch-action: none; /* the player's own taps and swipes, no pull-to-refresh */
   position: absolute;
   inset: 0;
   width: 100%;

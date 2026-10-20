@@ -423,7 +423,7 @@ def test_app_window_is_a_browser_in_app_mode(control):
 
 def test_app_window_falls_back_to_the_default_browser(control, monkeypatch):
     opened = []
-    monkeypatch.setattr(control, "_browsers", lambda: [])
+    monkeypatch.setattr(control, "_browsers", list)
     monkeypatch.setattr(control.webbrowser, "open", opened.append)
     control.open_window("http://127.0.0.1:5000")
     assert opened == ["http://127.0.0.1:5000"]

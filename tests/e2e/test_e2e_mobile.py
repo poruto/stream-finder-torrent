@@ -679,11 +679,6 @@ def test_show_player_menus_on_phone(h264_screens, screen):
 # changes are in the mobile audit report.
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=GESTURE_MISSING,
-    reason="player.js: a tap on the video plays/pauses instead of showing/hiding the controls",
-)
 def test_tap_on_video_shows_and_hides_controls(h264_screens):
     page = h264_screens("390x844", "cs")
     open_player(page, f"/movie/{fakes.MOVIE_ID}")
@@ -698,9 +693,6 @@ def test_tap_on_video_shows_and_hides_controls(h264_screens):
     assert page.evaluate(IDLE) and not page.evaluate(PAUSED), "2nd tap: controls away"
 
 
-@pytest.mark.xfail(
-    strict=True, raises=GESTURE_MISSING, reason="player.js: no double tap to seek 10 s"
-)
 def test_double_tap_seeks(h264_screens):
     page = h264_screens("844x390", "cs")
     open_player(page, f"/movie/{fakes.MOVIE_ID}")
@@ -716,11 +708,6 @@ def test_double_tap_seeks(h264_screens):
     assert not page.evaluate(PAUSED)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=GESTURE_MISSING,
-    reason="player.js: no swipe down to close the player",
-)
 def test_swipe_down_closes_the_player(h264_screens):
     page = h264_screens("390x844", "cs")
     open_player(page, f"/movie/{fakes.MOVIE_ID}")
@@ -735,11 +722,6 @@ def test_swipe_down_closes_the_player(h264_screens):
     page.locator("#player").wait_for(state="hidden", timeout=3000)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=GESTURE_MISSING,
-    reason="player.js: iPhone Safari has no Fullscreen API, needs video.webkitEnterFullscreen()",
-)
 def test_fullscreen_button_on_an_iphone(browser, household, h264):
     if not h264:
         pytest.skip("this Chromium build can't play H.264/AAC")

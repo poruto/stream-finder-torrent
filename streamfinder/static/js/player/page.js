@@ -214,6 +214,7 @@
             disabled: !aired,
             "aria-pressed": String(watched),
             title: t(watched ? "unmark_episode_watched" : "mark_episode_watched", { n: ep.episode }),
+            "aria-label": t(watched ? "unmark_episode_watched" : "mark_episode_watched", { n: ep.episode }),
           },
           [icon("check")],
         );
