@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 
 from . import config
+from .api_helpers import id_list
 from .i18n import t, tmdb_locale
 from .services import services
 from .tmdb import TMDBError
@@ -102,13 +103,14 @@ def _read() -> dict:
         return _empty()
 
 
-def _write(data: dict) -> None:
-    os.makedirs(os.path.dirname(PATH), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(PATH), suffix=".tmp")
+def write_json(path: str, data) -> None:
+    """`data` into `path` through a temporary file: never half written (also notified.json)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-        os.replace(tmp, PATH)
+        os.replace(tmp, path)
     except OSError:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -149,7 +151,7 @@ def _response(data: dict):
 
 def _save(data: dict) -> None:
     try:
-        _write(data)
+        write_json(PATH, data)
     except OSError as e:  # read-only disk: still answer with the merge
         logger.warning("shared state not saved: %s", e)
 
@@ -242,7 +244,7 @@ def profiles():
 @shared.route("/api/new-episodes")
 def new_episodes():
     """?ids=1,2,3 (TMDB show ids): each show's last aired episode, for "New episode" badges."""
-    ids = [int(i) for i in request.args.get("ids", "").split(",") if i.isdigit()][:40]
+    ids = id_list("ids")
     tmdb = services().tmdb
 
     def latest(tmdb_id: int):

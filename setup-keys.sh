@@ -5,6 +5,7 @@
 # Termux update service) it does nothing. Whatever is skipped once (Enter) is not
 # asked again - set it later on the web: Settings (admin login).
 # Exit status 2 = something was saved (restart the app to use it).
+# Windows asks the same in windows/control.py (ask_keys): keep the texts in step.
 set -uo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"

@@ -1,5 +1,5 @@
 // Storage on the Status page (admin): TorrServer's torrents and the app's cache, with
-// clean-up buttons. Without the admin login it only says how to get there.
+// clean-up buttons, and the backup. Without the admin login it only says how to get there.
 (() => {
   "use strict";
   const { el, api, t } = SF;
@@ -80,4 +80,31 @@
     load();
   });
   load();
+
+  // Backup: one JSON file to download; restoring sends it back to be merged.
+  const download = $("backup-download");
+  const message = $("backup-message");
+  $("backup-keys").addEventListener("change", (event) => {
+    download.href = `/api/backup${event.currentTarget.checked ? "?keys=1" : ""}`;
+  });
+  $("backup-restore").addEventListener("click", () => $("backup-file").click());
+  $("backup-file").addEventListener("change", async (event) => {
+    const input = event.currentTarget;
+    const [file] = input.files;
+    input.value = "";
+    if (!file || !confirm(t("backup_confirm", { name: file.name }))) return;
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch {
+      message.textContent = t("backup_invalid");
+      return;
+    }
+    try {
+      const data = await api("/api/backup/restore", backup);
+      message.textContent = t("backup_restored", { profiles: data.profiles, titles: data.titles, settings: data.settings.length });
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  });
 })();

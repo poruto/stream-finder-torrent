@@ -133,6 +133,22 @@ EDITABLE_KEYS = (
     "TORRSERVER_UPLOAD_LIMIT",
     "TORRSERVER_READ_AHEAD",
 )
+# Settings saved from the web that only go into a backup when the admin asks for it:
+# keys, logins (a name belongs with its password) and the private ntfy topic.
+SECRET_SETTINGS = (
+    "TMDB_API_KEY",
+    "OPENSUBTITLES_API_KEY",
+    "OPENSUBTITLES_USERNAME",
+    "OPENSUBTITLES_PASSWORD",
+    "TRANSCRIBE_API_KEY",
+    "SKTORRENT_USERNAME",
+    "SKTORRENT_PASSWORD",
+    "NOTIFY_NTFY_URL",
+    "NOTIFY_TELEGRAM_TOKEN",
+    "NOTIFY_TELEGRAM_CHAT",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD_HASH",
+)
 
 
 def _quote(value: str) -> str:

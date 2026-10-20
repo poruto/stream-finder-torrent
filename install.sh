@@ -34,20 +34,8 @@ mkdir -p data/torrserver/config data/torrserver/torrents data/cache
 echo "==> Starting"
 bash docker-up.sh
 
-# Local Whisper for AI subtitles - on by default, except on 32-bit boards like the
-# Raspberry Pi 3 (too slow; use a Groq key there). Opt out: touch cache/.no-whisper
-enable_local_whisper() {
-  [ "$(uname -m)" = "armv7l" ] && return 0
-  [ -f cache/.no-whisper ] && return 0
-  if [ ! -x "$HOME/whisper.cpp/build/bin/whisper-server" ]; then
-    bash install-whisper.sh || { echo "!! Local Whisper could not be installed - a Groq key works too (Settings)."; return 0; }
-  fi
-  if ! grep -q '^TRANSCRIBE_PROVIDER=' .env; then
-    { echo "TRANSCRIBE_PROVIDER=local"; echo "TRANSCRIBE_API_URL=http://127.0.0.1:8178/v1"; } >> .env
-    docker compose up -d --force-recreate app  # .env is read when the container starts
-  fi
-}
-enable_local_whisper
+# Local Whisper for AI subtitles (not on a Raspberry Pi 3; opt out: touch cache/.no-whisper)
+bash install-whisper.sh --enable
 
 echo "==> Enabling automatic updates from GitHub (checked every 5 minutes)"
 chmod +x autoupdate.sh update.sh setup-keys.sh docker-up.sh

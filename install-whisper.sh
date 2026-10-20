@@ -6,6 +6,7 @@
 # Models: tiny-q5_1 (30 MB, fastest - default), base-q5_1 (60 MB), small-q5_1 (190 MB).
 # The quality can also be switched on the Settings page; the server loads
 # models/ggml-current.bin, a link to the chosen one.
+#   bash install-whisper.sh --enable   # Docker host (install.sh, update.sh): see below
 set -euo pipefail
 
 MODEL="${WHISPER_MODEL:-}"
@@ -13,6 +14,24 @@ DIR="${WHISPER_DIR:-$HOME/whisper.cpp}"
 PORT="${WHISPER_PORT:-8178}"
 TERMUX=0
 [[ "${PREFIX:-}" == *com.termux* ]] && TERMUX=1
+
+# --enable: local Whisper for AI subtitles is on by default, except on 32-bit boards
+# like the Raspberry Pi 3 (too slow; use a Groq key there). Opt out: touch cache/.no-whisper
+# Installs it when it isn't yet and points the app's .env at it.
+if [ "${1:-}" = "--enable" ]; then
+  SELF="$(readlink -f "$0")"
+  cd "$(dirname "$SELF")"
+  [ "$(uname -m)" = "armv7l" ] && exit 0
+  [ -f cache/.no-whisper ] && exit 0
+  if [ ! -x "$DIR/build/bin/whisper-server" ]; then
+    bash "$SELF" || { echo "!! Local Whisper could not be installed - a Groq key works too (Settings)."; exit 0; }
+  fi
+  if ! grep -q '^TRANSCRIBE_PROVIDER=' .env; then
+    { echo "TRANSCRIBE_PROVIDER=local"; echo "TRANSCRIBE_API_URL=http://127.0.0.1:$PORT/v1"; } >> .env
+    docker compose up -d --force-recreate app  # .env is read when the container starts
+  fi
+  exit 0
+fi
 
 echo "==> Local Whisper for AI subtitles"
 if [ "$(uname -m)" = "armv7l" ]; then

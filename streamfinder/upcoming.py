@@ -10,9 +10,10 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, jsonify, redirect, render_template, url_for
 
 from . import config
+from .api_helpers import id_list
 from .i18n import tmdb_locale
 from .services import services
 from .tmdb import TMDBError, image_url
@@ -27,10 +28,6 @@ _GENERIC_NAME = re.compile(
 )
 DAY_TTL = 12 * 3600
 DIGITAL, PHYSICAL, THEATRICAL = 4, 5, 3
-
-
-def _ids(name: str) -> list[int]:
-    return [int(i) for i in request.args.get(name, "").split(",") if i.isdigit()][:40]
 
 
 def show_events(
@@ -120,8 +117,8 @@ def upcoming():
         (start + datetime.timedelta(days=DAYS_AHEAD)).isoformat(),
     )
     language = tmdb_locale()  # the visitor's: the pool's threads have no request
-    jobs = [(show_events, i) for i in _ids("shows")] + [
-        (movie_events, i) for i in _ids("movies")
+    jobs = [(show_events, i) for i in id_list("shows")] + [
+        (movie_events, i) for i in id_list("movies")
     ]
 
     def run(job):

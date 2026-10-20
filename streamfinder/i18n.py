@@ -1,6 +1,8 @@
 """UI translations. English is the default; the visitor's choice lives in a cookie."""
 
 import functools
+import os
+import re
 
 from flask import g, has_request_context, request
 from jinja2.utils import htmlsafe_json_dumps
@@ -93,6 +95,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "library_confirm_all": "Remove all {n} torrents from TorrServer? Playback positions are kept.",
         "library_freed": "Freed {size}",
         "library_offline": "TorrServer isn't answering: {error}",
+        "backup_title": "Backup",
+        "backup_help": "Continue watching, My list and the profiles of the whole household, with the server settings, in one file. Restoring merges it with what is here.",
+        "backup_keys": "Include API keys and passwords",
+        "backup_download": "Download backup",
+        "backup_restore": "Restore from a file",
+        "backup_confirm": "Restore {name}? Progress and lists are merged; the settings in the file replace the ones here.",
+        "backup_restored": "Restored – profiles: {profiles}, titles: {titles}, settings: {settings}",
+        "backup_invalid": "This file is not a StreamFinder backup",
         "still_watching": "Still watching?",
         "still_watching_yes": "Continue",
         "remembered_for_show": "Kept for the next episodes of this show",
@@ -121,7 +131,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "sort_popular": "Most popular",
         "sort_rating": "Top rated",
         "sort_new": "Newest",
-        "imdb_filter": "IMDb rating",
         "imdb_any": "Any rating",
         "imdb_min": "IMDb {n}+",
         "empty_browse": "Nothing matches these filters. Try another genre or rating.",
@@ -239,6 +248,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "error_not_found": "This page doesn't exist.",
         "back_home": "Back home",
         "err_json": "Expected a JSON body",
+        "err_cross_site": "Refused: the request came from another website",
         "err_missing_query": "Missing tmdb_id or query",
         "err_bad_magnet": "That's not a valid magnet link or info hash.",
         "err_no_seeds": "The torrent couldn't start – nobody is sharing it right now. Try another version.",
@@ -251,7 +261,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "ts_no_video": "There is no video in this torrent.",
         # JS: hero & versions
         "ep_short": "S{s}:E{e}",
-        "resume": "Resume",
         "resume_from": "Resume from {time}",
         "play_ep": "Play {ep}",
         "resume_ep": "Resume {ep}",
@@ -367,7 +376,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "password_too_short": "Use at least 8 characters.",
         "password_is_default": "Pick something other than the default password.",
         "setup_needed": "Almost there: log in as admin (admin / admin) and enter your TMDB API key below.",
-        "keys_legend": "API keys",
         "keys_help": "Shared by everyone using this server. Saved keys are never shown again – paste a new one to replace it.",
         "key_tmdb_help": "Required. Free key from {link} (Settings → API).",
         "key_os_help": "Optional: adds exact subtitle matching. Free key from {link}.",
@@ -385,7 +393,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "key_password": "Password",
         "login_invalid": "OpenSubtitles rejected the username or password.",
         "key_remove": "Remove OpenSubtitles key",
-        "key_remove_confirm": "Remove the OpenSubtitles key and login from this server?",
         "sync_by_audio": "Match to speech",
         "syncing_subs": "Matching subtitles to speech…",
         "sync_listening": "Listening to the speech {n}/{total}…",
@@ -402,8 +409,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "subs_source_online": "OpenSubtitles",
         "audio_menu": "Audio track",
         "subs_more": "{n} more",
-        "subs_translate_group": "Translate into {lang}",
-        "subs_translate_from": "From {lang}",
         "subs_machine": "machine translation",
         "subs_translating": "Translating subtitles…",
         "translator": "Machine translation",
@@ -417,7 +422,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "versions_group_dub": "Czech / Slovak dubbing",
         "versions_group_subs": "With Czech subtitles",
         "versions_group_orig": "Original language",
-        "version_lang_legend": "Language of versions",
         "version_lang_help": "Which versions to play first when there is a choice.",
         "version_lang_cs": "Czech first",
         "version_lang_cs_text": "Czech or Slovak dubbing first, then Czech subtitles; also picks the Czech audio track of a file. Searches Czech trackers too.",
@@ -425,16 +429,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "version_lang_any_text": "The best-quality version, usually in English. Czech versions are still listed.",
         "lang_dub": "{l} dub",
         "lang_subs": "{l} subs",
-        "filter_lang_dub": "Dubbed",
-        "filter_lang_subs": "With Czech subs",
-        "filter_lang_orig": "Original",
         "audio_track": "Audio",
         "audio_track_n": "Track {n}",
         "audio_switching": "Switching the audio to {name}…",
-        "subs_ai_group": "AI from the audio (experimental)",
         "subs_ai_original": "As spoken",
-        "subs_ai_translated": "Translated into {lang}",
-        "subs_ai_help": "Written from the speech while you watch; the first line takes a few seconds.",
         "subs_ai_label": "AI subtitles",
         "subs_ai_starting": "AI: listening…",
         "subs_ai_limit": "AI subtitles: the free limit is used up for a moment, continuing shortly.",
@@ -465,8 +463,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "advanced_settings": "Advanced",
         "settings_local": "Saved in this browser as you change them.",
         "admin_panel_help": "API keys, logins, AI subtitles and the admin account – for the admin.",
-        "subs_tab_translate": "Translate",
-        "subs_tab_ai": "AI",
         "subs_translate_into": "{from} → {to}",
         "subs_recommended": "Recommended",
         "subs_all": "All subtitles",
@@ -490,8 +486,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "engine_google": "Google",
         "key_ai_title": "AI subtitles (experimental)",
         "key_ai_help": "Writes subtitles from what is said, live, in any language. Both choices are free.",
-        "key_ai_local": "Whisper server on your computer (free, no key)",
-        "key_ai_local_help": "Address of an OpenAI-compatible Whisper server, e.g. Speaches (faster-whisper) running on your PC. A Raspberry Pi or phone is too slow to do it itself.",
         "key_ai_url": "Whisper server address",
         "key_invalid_speech": "This key or server doesn't offer speech-to-text (Whisper).",
         "url_invalid": "Enter a full address starting with http:// or https://.",
@@ -605,6 +599,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "library_confirm_all": "Odebrat všech {n} torrentů z TorrServeru? Rozkoukané pozice zůstanou.",
         "library_freed": "Uvolněno {size}",
         "library_offline": "TorrServer neodpovídá: {error}",
+        "backup_title": "Záloha",
+        "backup_help": "Pokračovat ve sledování, Můj seznam a profily celé domácnosti, k tomu nastavení serveru, v jednom souboru. Obnovení ho spojí s tím, co tu už je.",
+        "backup_keys": "Včetně API klíčů a hesel",
+        "backup_download": "Stáhnout zálohu",
+        "backup_restore": "Obnovit ze souboru",
+        "backup_confirm": "Obnovit {name}? Rozkoukané a seznamy se spojí, nastavení ze souboru nahradí to zdejší.",
+        "backup_restored": "Obnoveno – profily: {profiles}, tituly: {titles}, nastavení: {settings}",
+        "backup_invalid": "Tento soubor není záloha StreamFinderu",
         "still_watching": "Ještě se díváte?",
         "still_watching_yes": "Pokračovat",
         "remembered_for_show": "Zapamatováno i pro další díly",
@@ -632,7 +634,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "sort_popular": "Nejpopulárnější",
         "sort_rating": "Nejlépe hodnocené",
         "sort_new": "Nejnovější",
-        "imdb_filter": "Hodnocení IMDb",
         "imdb_any": "Jakékoli hodnocení",
         "imdb_min": "IMDb {n}+",
         "empty_browse": "Těmto filtrům nic neodpovídá. Zkus jiný žánr nebo hodnocení.",
@@ -743,6 +744,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "error_not_found": "Tahle stránka neexistuje.",
         "back_home": "Zpět domů",
         "err_json": "Očekáván JSON",
+        "err_cross_site": "Odmítnuto: požadavek přišel z jiného webu",
         "err_missing_query": "Chybí tmdb_id nebo dotaz",
         "err_bad_magnet": "Tohle není platný magnet link ani info hash.",
         "err_no_seeds": "Torrent se nepodařilo spustit – nikdo ho teď nesdílí. Zkus jinou verzi.",
@@ -754,7 +756,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "ts_error": "TorrServer nahlásil chybu.",
         "ts_no_video": "V torrentu není žádné video.",
         "ep_short": "Ř{s}:D{e}",
-        "resume": "Pokračovat",
         "resume_from": "Pokračovat od {time}",
         "play_ep": "Přehrát {ep}",
         "resume_ep": "Pokračovat {ep}",
@@ -869,7 +870,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "password_too_short": "Použij aspoň 8 znaků.",
         "password_is_default": "Zvol jiné než výchozí heslo.",
         "setup_needed": "Skoro hotovo: přihlas se jako správce (admin / admin) a vlož níže TMDB API klíč.",
-        "keys_legend": "API klíče",
         "keys_help": "Platí pro všechny, kdo tento server používají. Uložené klíče se už nikdy nezobrazí – pro změnu vlož nový.",
         "key_tmdb_help": "Povinný. Klíč zdarma na {link} (Nastavení → API).",
         "key_os_help": "Volitelný: přidá přesné párování titulků. Klíč zdarma na {link}.",
@@ -887,7 +887,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "key_password": "Heslo",
         "login_invalid": "OpenSubtitles odmítl jméno nebo heslo.",
         "key_remove": "Odebrat klíč OpenSubtitles",
-        "key_remove_confirm": "Odebrat z tohoto serveru klíč a přihlášení k OpenSubtitles?",
         "sync_by_audio": "Srovnat podle řeči",
         "syncing_subs": "Srovnávám titulky s řečí…",
         "sync_listening": "Poslouchám řeč {n}/{total}…",
@@ -906,8 +905,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "subs_source_online": "OpenSubtitles",
         "audio_menu": "Zvuková stopa",
         "subs_more": "Další ({n})",
-        "subs_translate_group": "Přeložit do: {lang}",
-        "subs_translate_from": "Z jazyka: {lang}",
         "subs_machine": "strojový překlad",
         "subs_translating": "Překládám titulky…",
         "translator": "Strojový překlad",
@@ -921,7 +918,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "versions_group_dub": "Český / slovenský dabing",
         "versions_group_subs": "S českými titulky",
         "versions_group_orig": "Původní znění",
-        "version_lang_legend": "Jazyk verzí",
         "version_lang_help": "Které verze pouštět přednostně, když je z čeho vybírat.",
         "version_lang_cs": "Česky přednostně",
         "version_lang_cs_text": "Nejdřív český nebo slovenský dabing, pak české titulky; u souboru vybere i českou zvukovou stopu. Prohledává i české trackery.",
@@ -929,16 +925,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "version_lang_any_text": "Verze v nejlepší kvalitě, většinou anglicky. České verze jsou v seznamu dál.",
         "lang_dub": "{l} dabing",
         "lang_subs": "{l} titulky",
-        "filter_lang_dub": "Dabované",
-        "filter_lang_subs": "S českými titulky",
-        "filter_lang_orig": "Původní znění",
         "audio_track": "Zvuk",
         "audio_track_n": "Stopa {n}",
         "audio_switching": "Přepínám zvuk na: {name}…",
-        "subs_ai_group": "AI ze zvuku (experimentální)",
         "subs_ai_original": "Jak se mluví",
-        "subs_ai_translated": "Přeložit do: {lang}",
-        "subs_ai_help": "Píše se z řeči během sledování; první řádek trvá pár sekund.",
         "subs_ai_label": "AI titulky",
         "subs_ai_starting": "AI: poslouchám…",
         "subs_ai_limit": "AI titulky: bezplatný limit je na chvíli vyčerpaný, za chvíli pokračuji.",
@@ -969,8 +959,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "advanced_settings": "Pokročilé",
         "settings_local": "Ukládá se v tomto prohlížeči hned při změně.",
         "admin_panel_help": "API klíče, přihlášení, AI titulky a účet správce – pro správce.",
-        "subs_tab_translate": "Přeložit",
-        "subs_tab_ai": "AI",
         "subs_translate_into": "{from} → {to}",
         "subs_recommended": "Doporučené",
         "subs_all": "Všechny titulky",
@@ -994,8 +982,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "engine_google": "Google",
         "key_ai_title": "AI titulky (experimentální)",
         "key_ai_help": "Píše titulky z toho, co se říká, živě a v jakémkoli jazyce. Obě možnosti jsou zdarma.",
-        "key_ai_local": "Whisper server na tvém počítači (zdarma, bez klíče)",
-        "key_ai_local_help": "Adresa OpenAI-kompatibilního Whisper serveru, třeba Speaches (faster-whisper) na tvém PC. Raspberry Pi ani telefon na to sám nestačí.",
         "key_ai_url": "Adresa Whisper serveru",
         "key_invalid_speech": "Tenhle klíč nebo server neumí převod řeči na text (Whisper).",
         "url_invalid": "Zadej celou adresu začínající http:// nebo https://.",
@@ -1061,9 +1047,46 @@ def plural(n: int, base: str) -> str:
     return t(f"{base}_{form}", n=n)
 
 
+JS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js")
+# Keys the scripts get from the server instead of their own code ({notice} of /api/keys).
+JS_DYNAMIC_KEYS = ("torrserver_pending",)
+
+
+@functools.cache
+def js_keys() -> frozenset[str]:
+    """The keys the frontend's scripts use (static/js and its folders), found once.
+
+    Every quoted string that is a key ("key_saved", also in ternaries and lists of keys),
+    every key a template literal can build (`avail_${a}` -> avail_*), the forms of
+    SF.plural(n, "peers") and JS_DYNAMIC_KEYS.
+    """
+    keys = STRINGS[DEFAULT_LANGUAGE]
+    found = set(JS_DYNAMIC_KEYS)
+    for root, _, files in os.walk(JS_DIR):
+        for name in files:
+            if not name.endswith(".js"):
+                continue
+            with open(os.path.join(root, name), encoding="utf-8") as f:
+                code = f.read()
+            found |= set(re.findall(r"""["']([a-z0-9_]+)["']""", code))
+            for prefix in re.findall(r"`([a-z0-9_]+_)\$\{", code):
+                found |= {key for key in keys if key.startswith(prefix)}
+            for base in re.findall(
+                r"""plural\([^;]*?,\s*["']([a-z0-9_]+)["']\s*\)""", code
+            ):
+                found |= {f"{base}_{form}" for form in ("one", "few", "many")}
+    return frozenset(found & keys.keys())
+
+
+def _js_strings(lang: str) -> dict[str, str]:
+    keys = js_keys()
+    strings = {**STRINGS[DEFAULT_LANGUAGE], **STRINGS[lang]}
+    return {key: text for key, text in strings.items() if key in keys}
+
+
 def js_strings() -> dict[str, str]:
-    """Every string of the current language, for the frontend."""
-    return {**STRINGS[DEFAULT_LANGUAGE], **STRINGS[current_language()]}
+    """The strings of the current language that the frontend uses (js_keys)."""
+    return _js_strings(current_language())
 
 
 @functools.cache
@@ -1072,7 +1095,7 @@ def _js_strings_json(lang: str) -> Markup:
 
     policies = current_app.jinja_env.policies
     return htmlsafe_json_dumps(
-        {**STRINGS[DEFAULT_LANGUAGE], **STRINGS[lang]},
+        _js_strings(lang),
         dumps=policies["json.dumps_function"],
         **policies["json.dumps_kwargs"],
     )

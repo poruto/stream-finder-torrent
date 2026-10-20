@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 GOOGLE_URL = "https://translate.googleapis.com/translate_a/single"
 GOOGLE_BATCH = 4000  # characters per request
 AI_BATCH = 40  # lines per request
-ENGINES = ("google", "ai")
 
 
 class TranslateError(Exception):

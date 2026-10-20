@@ -131,6 +131,39 @@ def test_status_page_lists_services_and_storage(page, torrserver):
     assert "Test Movie" in page.locator("#library-list").inner_text()
 
 
+def test_backup_downloads_and_restores(page, tmp_path, monkeypatch):
+    """The Status page's backup: a file to keep, and the same file merged back."""
+    from streamfinder import config, notify, shared
+
+    monkeypatch.setattr(config, "SETTINGS_FILE", str(tmp_path / "settings.env"))
+    monkeypatch.setattr(notify, "STATE", str(tmp_path / "notified.json"))
+    shared.write_json(
+        shared.PATH,
+        {"progress": {"movie:1": {"position": 60, "updated": 100}}, "list": {}},
+    )
+    page.login_admin()
+    page.open("/status")
+    page.check("#backup-keys")
+    assert page.get_attribute("#backup-download", "href") == "/api/backup?keys=1"
+    page.uncheck("#backup-keys")
+    with page.expect_download() as info:
+        page.click("#backup-download")
+    backup = tmp_path / info.value.suggested_filename
+    info.value.save_as(backup)
+    assert backup.name.startswith("streamfinder-backup-")
+
+    shared.write_json(shared.PATH, {})  # everything lost
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.set_input_files("#backup-file", str(backup))  # a fetch with the page's Origin
+    page.wait_for_function(
+        "document.getElementById('backup-message').textContent !== ''",
+        timeout=10_000,
+    )
+    assert page.inner_text("#backup-message").startswith("Restored – profiles: 1,")
+    assert shared._read()["progress"]["movie:1"]["position"] == 60
+    assert not page.errors, "\n".join(page.errors)
+
+
 def test_settings_fit_a_phone_screen(phone):
     phone.login_admin()
     phone.open("/settings")

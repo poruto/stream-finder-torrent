@@ -11,8 +11,8 @@ from flask import Flask
 
 from streamfinder import auth, config, i18n, version
 from streamfinder.subtitles.whisper_models import MODELS as WHISPER_MODELS
-from streamfinder.views import BROWSE_LANGUAGES, BROWSE_SORTS
 from streamfinder.version import from_subjects
+from streamfinder.views import BROWSE_LANGUAGES, BROWSE_SORTS
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "streamfinder"
@@ -279,7 +279,7 @@ def _used_keys():
     files = [
         *PACKAGE.glob("templates/*.html"),
         *PACKAGE.glob("**/*.py"),
-        *PACKAGE.glob("static/js/*.js"),
+        *PACKAGE.glob("static/js/**/*.js"),
     ]
     for path in files:
         text = path.read_text(encoding="utf-8")
@@ -315,13 +315,103 @@ def test_keys_built_at_runtime_exist(prefix, suffixes):
     assert missing == []
 
 
+# Keys put together at runtime, which no scan for a quoted key finds.
+RUNTIME_KEYS = [
+    r"sort_\w+",  # browse.html: t('sort_' ~ key)
+    r"lang_\w+",  # browse.html: t('lang_' ~ code); player.js: `lang_${kind}`
+    r"quality_\w+",  # settings.html, _player.html: t('quality_' ~ value [~ '_text'])
+    r"version_lang_\w+",  # settings.html: t('version_lang_' ~ value [~ '_text'])
+    r"subs_missing_\w+",  # settings.html
+    r"translator_\w+",  # settings.html; player.js: `translator_${...}`
+    r"ai_via_\w+",  # settings.html
+    r"whisper_quality_\w+",  # settings.html
+    r"read_ahead_\w+",  # settings.html
+    r"ts_\w+",  # api_helpers.torrserver_error: t(f"ts_{error.code}")
+    r"(avail|pack|note|engine|subs_source|versions_group)_\w+",  # player.js: `avail_${a}`
+    r"key_remove_confirm_\w+",  # app.js: `key_remove_confirm_${what}`
+]
+
+
+def _code_files():
+    return [
+        path
+        for path in [
+            *PACKAGE.rglob("*.py"),
+            *PACKAGE.rglob("templates/*.html"),
+            *PACKAGE.rglob("static/js/**/*.js"),
+        ]
+        if path.name != "i18n.py"
+    ]
+
+
+def test_every_key_is_used_somewhere():
+    used, plurals = set(), set()
+    for path in _code_files():
+        text = path.read_text(encoding="utf-8")
+        used |= set(
+            re.findall(r"""["']([a-z0-9_]+)["']""", text)
+        )  # t("key"), keys in lists
+        plurals |= set(re.findall(r"""plural\([^,()]+,\s*["']([a-z0-9_]+)["']""", text))
+    runtime = re.compile("|".join(RUNTIME_KEYS))
+    unused = [
+        key
+        for key in EN
+        if key not in used
+        and not runtime.fullmatch(key)
+        and key.rsplit("_", 1)[0] not in plurals
+    ]
+    assert unused == []
+
+
+def _js_references():
+    """Keys the scripts ask for: t("key") (also in ternaries), plural forms, `prefix_${}`."""
+    keys = set()
+    for path in PACKAGE.rglob("static/js/**/*.js"):
+        text = path.read_text(encoding="utf-8")
+        for call in re.findall(r"""(?<![\w.])(?:SF\.)?t\(([^()]*)""", text):
+            keys |= set(re.findall(r"""["']([a-z0-9_]+)["']""", call))
+        for base in re.findall(
+            r"""plural\([^;]*?,\s*["']([a-z0-9_]+)["']\s*\)""", text
+        ):
+            keys |= {f"{base}_{form}" for form in ("one", "few", "many")}
+        for prefix in re.findall(r"""t\(\s*`([a-z0-9_]+_)\$\{""", text):
+            keys |= {key for key in EN if key.startswith(prefix)}
+    return keys
+
+
+def test_pages_send_the_keys_the_scripts_use():
+    sent = i18n.js_keys()
+    referenced = _js_references()
+    assert len(referenced) > 150  # the scan finds the scripts' translations
+    assert sorted(k for k in referenced if k in EN and k not in sent) == []
+    # Keys the scripts get from elsewhere: the library's list, the server's notice.
+    for key in (
+        "library_cache",
+        "library_whisper",
+        "pick_recommended",
+        *i18n.JS_DYNAMIC_KEYS,
+    ):
+        assert key in sent
+    # Templates translate the rest on the server: pages carry well under half of them.
+    assert len(sent) < 0.6 * len(EN)
+    assert "settings_title" not in sent and "footer_data" not in sent
+
+
+def test_js_strings_are_the_sent_keys_in_the_language():
+    app = Flask(__name__)
+    with app.test_request_context("/", headers={"Cookie": "lang=cs"}):
+        strings = i18n.js_strings()
+    assert strings.keys() == i18n.js_keys()
+    assert strings["key_saved"] == CS["key_saved"]
+
+
 def test_t_uses_the_cookie_language_and_falls_back():
     app = Flask(__name__)
     with app.test_request_context("/", headers={"Cookie": "lang=cs"}):
         assert i18n.current_language() == "cs" and i18n.tmdb_locale() == "cs-CZ"
         assert i18n.t("nav_movies") == CS["nav_movies"]
         assert i18n.t("no_such_key") == "no_such_key"
-        assert i18n.js_strings()["nav_movies"] == CS["nav_movies"]
+        assert i18n.js_strings()["key_saved"] == CS["key_saved"]
     with app.test_request_context("/", headers={"Cookie": "lang=xx"}):
         assert (
             i18n.current_language() == "en" and i18n.t("nav_movies") == EN["nav_movies"]

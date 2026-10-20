@@ -52,6 +52,22 @@
       </div>
       <ul class="library-list" id="library-list"></ul>
     </section>
+    <section class="library" id="backup" aria-labelledby="backup-title">
+      <header class="library-head">
+        <h2 id="backup-title">{{ t('backup_title') }}</h2>
+        <p class="muted">{{ t('backup_help') }}</p>
+      </header>
+      <div class="library-actions">
+        <a class="btn btn-ghost" id="backup-download" href="{{ url_for('library.backup') }}" download>{{ t('backup_download') }}</a>
+        <button class="btn btn-ghost" type="button" id="backup-restore">{{ t('backup_restore') }}</button>
+        <input type="file" id="backup-file" accept=".json,application/json" hidden>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="backup-keys">
+        <span>{{ t('backup_keys') }}</span>
+      </label>
+      <p class="muted" id="backup-message" role="status"></p>
+    </section>
     {% else %}
     <p class="muted library">{{ t('library_login') }}</p>
     {% endif %}

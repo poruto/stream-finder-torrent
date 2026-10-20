@@ -20,7 +20,6 @@ import logging
 import os
 import platform
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -610,7 +609,7 @@ def _install_whisper() -> None:
 
 
 def ask_keys() -> bool:
-    """Ask for the API keys and logins that are not set yet (as setup-keys.sh does).
+    """Ask for the API keys and logins that are not set yet, with setup-keys.sh's texts.
 
     Whatever is skipped once (Enter) is not asked again. True = something was saved.
     """
@@ -721,17 +720,6 @@ def install() -> None:
 # --- commands ----------------------------------------------------------------
 
 
-def _lan_ip() -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        try:
-            s.connect(
-                ("192.0.2.1", 9)
-            )  # no packet is sent; just picks the network address
-            return s.getsockname()[0]
-        except OSError:
-            return "127.0.0.1"
-
-
 def _responds(url: str) -> bool:
     try:
         requests.get(url, timeout=3)
@@ -767,7 +755,9 @@ def start() -> None:
     print()
     print(f"Open on this PC:      http://127.0.0.1:{port}")
     if (_env().get("HOST") or "0.0.0.0") == "0.0.0.0":
-        print(f"Open on your network: http://{_lan_ip()}:{port}")
+        from streamfinder.lan import lan_ip
+
+        print(f"Open on your network: http://{lan_ip()}:{port}")
 
 
 def stop() -> None:

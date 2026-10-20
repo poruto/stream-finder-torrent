@@ -6,7 +6,7 @@ import os
 
 from flask import Flask, jsonify, render_template, request, url_for
 
-from . import compression, config, i18n, version
+from . import compression, config, csrf, i18n, version
 from .services import Services
 from .tmdb import TMDBError
 
@@ -35,13 +35,19 @@ def create_app(testing: bool = False) -> Flask:
         notify.start(app)  # new-episode notifications (when a channel is set)
     app.extensions["streamfinder"] = services
 
+    from .admin import admin
     from .api import api
     from .library import library
+    from .playback import playback
     from .shared import shared
+    from .subtitle_api import subtitle_api
     from .views import web
 
     app.register_blueprint(web)
     app.register_blueprint(api)
+    app.register_blueprint(playback)
+    app.register_blueprint(subtitle_api)
+    app.register_blueprint(admin)
     app.register_blueprint(shared)
     app.register_blueprint(library)
     from .notify import notify as notify_bp
@@ -94,6 +100,7 @@ def create_app(testing: bool = False) -> Flask:
             response.cache_control.max_age = 31536000 if request.args.get("v") else 300
         return response
 
+    csrf.init_app(app)  # state-changing requests only from the app's own pages
     compression.init_app(app)
 
     if not testing and (

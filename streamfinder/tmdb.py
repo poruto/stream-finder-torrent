@@ -226,9 +226,6 @@ class TMDBClient:
             params["with_original_language"] = language
         return self._get(f"/discover/{media_type}", ttl=600, **params)
 
-    def listing(self, path: str, page: int = 1) -> dict[str, Any]:
-        return self._get(path, ttl=600, page=page)
-
     def genres(self, media_type: str) -> list[dict[str, Any]]:
         try:
             return self._get(f"/genre/{media_type}/list", ttl=86400).get("genres", [])

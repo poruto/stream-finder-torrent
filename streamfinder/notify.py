@@ -11,8 +11,6 @@ import datetime
 import json
 import logging
 import os
-import socket
-import tempfile
 import threading
 import time
 
@@ -22,6 +20,7 @@ from flask import Blueprint, jsonify, request
 from . import config, shared
 from .auth import admin_required
 from .i18n import t
+from .lan import lan_ip
 from .services import services
 from .tmdb import TMDBError
 
@@ -86,7 +85,7 @@ def due(latest: dict | None, watched: int, today: datetime.date) -> bool:
 
 def playable(tmdb_id: int, season: int, episode: int) -> dict | None:
     """The version the player would pick for that episode, when it has seeders."""
-    from .api import search_query  # the same search as the player's
+    from .playback import search_query  # the same search as the player's
 
     query = search_query(
         {"tmdb_id": tmdb_id, "media_type": "tv", "season": season, "episode": episode}
@@ -98,15 +97,7 @@ def playable(tmdb_id: int, season: int, episode: int) -> dict | None:
 
 
 def _lan_url() -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        try:
-            s.connect(
-                ("192.0.2.1", 9)
-            )  # no packet is sent; just picks the network address
-            host = s.getsockname()[0]
-        except OSError:
-            host = "127.0.0.1"
-    return f"http://{host}:{config.PORT}"
+    return f"http://{lan_ip()}:{config.PORT}"
 
 
 def send(title: str, text: str, link: str = "") -> None:
@@ -135,14 +126,6 @@ def _read_notified() -> dict:
             return json.load(f)
     except (OSError, ValueError):
         return {}
-
-
-def _write_notified(data: dict) -> None:
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATE), suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    os.replace(tmp, STATE)
 
 
 def check_once(today: datetime.date | None = None) -> list[str]:
@@ -190,7 +173,7 @@ def check_once(today: datetime.date | None = None) -> list[str]:
         notified[str(tmdb_id)] = tag
         sent.append(f"{name} {tag}")
     if sent:
-        _write_notified(notified)
+        shared.write_json(STATE, notified)
     _status.update(checked=time.time(), sent=sent or _status["sent"])
     return sent
 
