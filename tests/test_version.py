@@ -4,7 +4,10 @@ from streamfinder.version import from_subjects
 def test_features_raise_minor_others_patch():
     assert from_subjects([]) == "1.0.0"
     assert from_subjects(["chore: initial commit", "feat: add search"]) == "1.1.0"
-    assert from_subjects(["feat(player): seek bar", "fix: typo", "docs: readme"]) == "1.1.2"
+    assert (
+        from_subjects(["feat(player): seek bar", "fix: typo", "docs: readme"])
+        == "1.1.2"
+    )
 
 
 def test_breaking_change_raises_major():

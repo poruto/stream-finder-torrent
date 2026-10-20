@@ -24,8 +24,11 @@ Anything less than certain changes nothing: wrong subtitles are worse than late 
 import bisect
 import re
 import unicodedata
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from functools import lru_cache
 from statistics import median
 
 # Frame-rate conversions that commonly cause drift (PAL speed-up and back).
@@ -174,16 +177,22 @@ def _overlap(
     intervals: list[tuple[float, float]], speech: list[tuple[float, float]]
 ) -> float:
     """Total overlap of two sorted interval lists (linear merge)."""
-    total, i, j = 0.0, 0, 0
-    while i < len(intervals) and j < len(speech):
-        start = max(intervals[i][0], speech[j][0])
-        end = min(intervals[i][1], speech[j][1])
-        if end > start:
-            total += end - start
-        if intervals[i][1] < speech[j][1]:
-            i += 1
-        else:
+    total, j, last = 0.0, 0, len(speech) - 1
+    if last < 0:
+        return total
+    s2, e2 = speech[0]
+    for s1, e1 in intervals:
+        while True:
+            start = s1 if s1 > s2 else s2
+            end = e1 if e1 < e2 else e2
+            if end > start:
+                total += end - start
+            if e1 < e2:
+                break  # next interval
+            if j == last:
+                return total
             j += 1
+            s2, e2 = speech[j]
     return total
 
 
@@ -250,11 +259,23 @@ def align(
     speech = [(max(s, lo), min(e, hi)) for s, e in sorted(speech) if e > lo and s < hi]
     cues = sorted(in_reach(cues, window))
     speech_total = sum(e - s for s, e in speech)
+    # Scaled once per scale, not on every try; sorted by start, so a try only
+    # looks at the cues that can reach into the window (found by bisection).
+    scaled = {k: [(s * k, e * k) for s, e in cues] for k in SCALES}
+    starts = {k: [s for s, _ in moved] for k, moved in scaled.items()}
+    longest = {
+        k: max((e - s for s, e in moved), default=0.0) for k, moved in scaled.items()
+    }
 
     def measure(scale: float, offset: float) -> tuple[float, float]:
         """(agreement, share of subtitle time on speech)."""
-        moved = [(s * scale + offset, e * scale + offset) for s, e in cues]
-        inside = [(max(s, lo), min(e, hi)) for s, e in moved if e > lo and s < hi]
+        first = bisect.bisect_left(starts[scale], lo - offset - longest[scale] - 1e-6)
+        last = bisect.bisect_right(starts[scale], hi - offset + 1e-6, first)
+        inside = [
+            (lo if s < lo else s, hi if e > hi else e)
+            for s, e in ((s + offset, e + offset) for s, e in scaled[scale][first:last])
+            if e > lo and s < hi
+        ]
         length = sum(e - s for s, e in inside)
         # A handful of cues brushing the window edge must not "match" perfectly.
         if length < 0.3 * speech_total or length <= 1:
@@ -270,8 +291,10 @@ def align(
         for k in range(-steps, steps + 1)
     ]
     agreement, scale, offset = max(curve, key=lambda c: c[0])
-    # Refine around the coarse peak.
+    # Refine around the coarse peak (k = 0 is the peak itself).
     for k in range(-int(STEP / FINE_STEP), int(STEP / FINE_STEP) + 1):
+        if not k:
+            continue
         value = measure(scale, offset + k * FINE_STEP)[0]
         if value > agreement + 1e-9:
             agreement, offset = value, offset + k * FINE_STEP
@@ -342,6 +365,7 @@ _WORD_RE = re.compile(r"[^\W_]+")
 _SPECIAL_TOKEN = re.compile(r"\s*(\[_[A-Z]+_?\d*\]|<\|[^|]*\|>)\s*")  # whisper.cpp
 
 
+@lru_cache(maxsize=16384)  # a film's lines and the words heard recur on every sync
 def _words(text: str) -> str:
     text = _TAG_RE.sub(" ", text or "")
     text = unicodedata.normalize("NFKD", text.lower())
@@ -407,6 +431,39 @@ def line_words(lines: list[tuple[float, float, str]]) -> list[Word]:
     return out
 
 
+def _similarity(threshold: float) -> Callable[[str, str], float]:
+    """`SequenceMatcher(None, a, b).ratio()`, worked out once per pair of texts.
+
+    Pairs that certainly stay under `threshold` give 0.0 without it: the length
+    of the shorter text and the letters both share (SequenceMatcher's own
+    real_quick_ratio / quick_ratio bounds) rule most of them out cheaply.
+    """
+    cache: dict[tuple[str, str], float] = {}
+    letters: dict[str, Counter] = {}
+
+    def ratio(a: str, b: str) -> float:
+        total = len(a) + len(b)
+        if not total:
+            return 1.0
+        if 2.0 * min(len(a), len(b)) / total < threshold:
+            return 0.0
+        if a not in letters:
+            letters[a] = Counter(a)
+        if b not in letters:
+            letters[b] = Counter(b)
+        if 2.0 * sum((letters[a] & letters[b]).values()) / total < threshold:
+            return 0.0
+        return SequenceMatcher(None, a, b).ratio()
+
+    def similarity(a: str, b: str) -> float:
+        value = cache.get((a, b))
+        if value is None:
+            value = cache[a, b] = ratio(a, b)
+        return value
+
+    return similarity
+
+
 def match_words(
     cues: list[tuple[float, float, str]], words: list[Word]
 ) -> list[tuple[float, float, float]]:
@@ -416,39 +473,49 @@ def match_words(
     largest shift we accept; the next few words must match too. A line can
     match in several places ("No, no, no."): `fit_pairs` keeps the one that
     agrees with the others.
+
+    Lines out of reach of every word heard are skipped before their text is
+    looked at, and the same words compared again (a film repeats its words
+    and names) cost a dictionary lookup.
     """
     words = sorted(words, key=lambda w: w[0])  # stable: a line's words keep their order
     if not words:
         return []
     times = [t for t, _, _ in words]
+    said = [w for _, w, _ in words]
     reach = MAX_SHIFT + 1
+    first_like = _similarity(0.8)
+    phrase_like = _similarity(MIN_SIMILARITY)
     pairs = []
     for start, _, text in cues:
+        spans = [
+            (
+                bisect.bisect_left(times, start * k - reach),
+                bisect.bisect_right(times, start * k + reach),
+            )
+            for k in SCALES
+        ]
+        if all(lo >= hi for lo, hi in spans):
+            continue
         head = _words(text).split()[:HEAD]
         if len(head) < MIN_WORDS:
             continue
         phrase = " ".join(head)
+        sizes = [n for n in (len(head) - 1, len(head), len(head) + 1) if n >= 1]
         seen = set()
-        for k in SCALES:
-            lo = bisect.bisect_left(times, start * k - reach)
-            hi = bisect.bisect_right(times, start * k + reach)
+        for lo, hi in spans:
             for i in range(lo, hi):
                 t, word, timed = words[i]
                 if i in seen or not timed:
                     continue
                 seen.add(i)
                 first = word == head[0] or (
-                    len(head[0]) > 3
-                    and SequenceMatcher(None, word, head[0]).ratio() >= 0.8
+                    len(head[0]) > 3 and first_like(word, head[0]) >= 0.8
                 )
                 if not first:
                     continue
                 similarity = max(
-                    SequenceMatcher(
-                        None, phrase, " ".join(w for _, w, _ in words[i : i + n])
-                    ).ratio()
-                    for n in (len(head) - 1, len(head), len(head) + 1)
-                    if n >= 1
+                    phrase_like(phrase, " ".join(said[i : i + n])) for n in sizes
                 )
                 if similarity >= MIN_SIMILARITY:
                     pairs.append((start, t, similarity))

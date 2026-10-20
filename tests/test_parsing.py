@@ -303,7 +303,10 @@ def test_web_dl_suffix_is_not_a_release_group():
         ("Movie.2019.1080p.NF.WEBRip.x265", "nf"),
         ("Movie.2019.1080p.DSNP.WEB-DL", "dsnp"),
         ("Movie.2019.1080p.ATVP.WEB", "atvp"),
-        ("Movie.2019.1080p.AMZN.BluRay", None),  # a streaming tag only counts on web releases
+        (
+            "Movie.2019.1080p.AMZN.BluRay",
+            None,
+        ),  # a streaming tag only counts on web releases
     ],
 )
 def test_streaming_service(name, service):

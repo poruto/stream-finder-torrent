@@ -27,7 +27,11 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
       # Chromium for the headless browser tests in tests/e2e
       - run: python -m playwright install --with-deps chromium
-      - run: ruff check --select E9,F streamfinder tests windows # errors and pyflakes
+      - run: ruff check streamfinder tests windows # rules in pyproject.toml
+      # Informational for now: windows/control.py still needs ruff format (one
+      # line); drop continue-on-error once it is formatted.
+      - run: ruff format --check streamfinder tests windows
+        continue-on-error: true
       - run: python -m pytest tests -q # unit tests and the browser tests (tests/e2e)
       - name: Version
         id: version

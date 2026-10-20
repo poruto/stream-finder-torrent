@@ -22,6 +22,25 @@ def test_released_or_undated_titles_get_none():
 def test_card_carries_the_label():
     app = create_app(testing=True)
     with app.test_request_context():
-        item = card({"id": 1, "title": "Future", "poster_path": "/p.jpg", "release_date": "2999-01-02"}, "movie")
+        item = card(
+            {
+                "id": 1,
+                "title": "Future",
+                "poster_path": "/p.jpg",
+                "release_date": "2999-01-02",
+            },
+            "movie",
+        )
         assert item["coming"]
-        assert card({"id": 2, "title": "Past", "poster_path": "/p.jpg", "release_date": "1999-01-02"}, "movie")["coming"] is None
+        assert (
+            card(
+                {
+                    "id": 2,
+                    "title": "Past",
+                    "poster_path": "/p.jpg",
+                    "release_date": "1999-01-02",
+                },
+                "movie",
+            )["coming"]
+            is None
+        )

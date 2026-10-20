@@ -125,11 +125,24 @@ def is_released(data: dict[str, Any]) -> bool:
     return data.get("status") in ("Released", "Returning Series", "Ended", "Canceled")
 
 
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 
 
 def coming_label(data: dict[str, Any]) -> str | None:
-    """"Out 18 Dec 2026" / "Vyjde 18. 12. 2026" for a title that isn't out yet."""
+    """ "Out 18 Dec 2026" / "Vyjde 18. 12. 2026" for a title that isn't out yet."""
     date = data.get("release_date") or data.get("first_air_date") or ""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or is_released(data):
         return None
@@ -149,7 +162,9 @@ def backdrop_srcset(path: str | None) -> str | None:
     """`srcset` for a hero backdrop, so phones don't download the original (often 4K) file."""
     if not path:
         return None
-    return ", ".join(f"{image_url(path, size)} {width}w" for size, width in _BACKDROP_WIDTHS)
+    return ", ".join(
+        f"{image_url(path, size)} {width}w" for size, width in _BACKDROP_WIDTHS
+    )
 
 
 # Widths offered for posters: rows and grids are a third of a phone's width and up to
@@ -308,7 +323,9 @@ def set_language(code: str):
     target = request.args.get("next") or request.referrer or url_for("web.home")
     parsed = urlparse(target)
     if parsed.scheme in ("http", "https") and parsed.netloc == request.host:
-        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")  # the referrer
+        target = parsed.path + (
+            f"?{parsed.query}" if parsed.query else ""
+        )  # the referrer
     # Only a path inside this app: no open redirect via //evil.example, /\evil.example
     # or a scheme without a host ("https:evil.example", which browsers complete).
     if not target.startswith("/") or target.startswith(("//", "/\\")):

@@ -1,0 +1,41 @@
+# Tool settings only - StreamFinder is not packaged, it runs from the checkout.
+# The rules match how the code is already written, so editors and formatter
+# hooks keep files as they are instead of reflowing them.
+
+[tool.ruff]
+line-length = 88
+target-version = "py310" # the oldest Python a checkout still runs on
+extend-exclude = ["torr"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint]
+# Errors and pyflakes, plus the families the code already follows.
+select = [
+  "E4",  # imports
+  "E7",  # statements
+  "E9",  # syntax errors
+  "F",   # pyflakes
+  "W",   # whitespace warnings
+  "I",   # import order
+  "B",   # bugbear
+  "UP",  # pyupgrade
+  "SIM", # simplifications
+  "PIE", # misc. unnecessary code
+  "T10", # leftover debugger calls
+]
+ignore = [
+  "E501",   # long lines: the formatter decides, long strings and comments stay
+  "E731",   # a short lambda assigned to a name reads fine
+  "SIM105", # try/except/pass keeps a comment on why the error is fine
+  "SIM905", # a word list written as one string to split reads better
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The tray app puts the checkout on sys.path before importing its dependencies.
+"windows/control.py" = ["E402"]
+# A quick open().read() in a test is fine.
+"tests/**" = ["SIM115"]

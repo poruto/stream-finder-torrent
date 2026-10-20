@@ -1,2 +1,4 @@
 # Jinja templates: Prettier does not understand {% %} blocks and breaks them
 streamfinder/templates/
+# TorrServer's own settings file and binary (written by TorrServer itself)
+torr/

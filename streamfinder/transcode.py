@@ -35,7 +35,9 @@ RW_TIMEOUT = ["-rw_timeout", "60000000"]
 # No console window for every ffmpeg on Windows (when run as a service or by pythonw).
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 PROBE_CACHE = 64  # files whose probe result is kept
-PROBE_RETRY = 10  # seconds before a failed probe is tried again (a cold torrent wakes up)
+PROBE_RETRY = (
+    10  # seconds before a failed probe is tried again (a cold torrent wakes up)
+)
 
 _STREAM_RE = re.compile(
     r"Stream #0:(\d+)(?:\[\w+\])?(?:\((\w+)\))?: (Video|Audio): (\w+)[^\n]*"

@@ -308,7 +308,11 @@ def test_local_whisper_down_without_a_key_still_fails(monkeypatch):
     from streamfinder.subtitles.transcribe import TranscribeError
 
     t = Transcriber(_FakeTranscoder(), "", "http://127.0.0.1:1/v1", "local")
-    monkeypatch.setattr(t, "list_models", lambda *a: (_ for _ in ()).throw(requests.ConnectionError("refused")))
+    monkeypatch.setattr(
+        t,
+        "list_models",
+        lambda *a: (_ for _ in ()).throw(requests.ConnectionError("refused")),
+    )
     try:
         t.models()
     except TranscribeError as e:
