@@ -14,5 +14,4 @@ bin/
 VERSION
 build/
 dist/
-.claude/
 images/*.png
