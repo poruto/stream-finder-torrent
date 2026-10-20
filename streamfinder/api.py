@@ -7,13 +7,15 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+import requests
 from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
 
-from . import config
+from . import auth, config
+from .auth import admin_required
 from .i18n import t
 from .services import services
 from .subtitles.sync import align
-from .tmdb import match_titles
+from .tmdb import TMDBError, match_titles
 from .torrents import SearchQuery
 from .torrserver import (
     TorrServerError,
@@ -392,6 +394,135 @@ def subtitle_vtt(candidate_id: str):
     return Response(
         vtt, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=86400"}
     )
+
+
+def _key_status() -> dict:
+    return {
+        "tmdb": bool(config.TMDB_API_KEY),
+        "opensubtitles": bool(config.OPENSUBTITLES_API_KEY),
+        "opensubtitles_login": bool(
+            config.OPENSUBTITLES_USERNAME and config.OPENSUBTITLES_PASSWORD
+        ),
+    }
+
+
+@api.route("/keys")
+@admin_required
+def keys_status():
+    """Which keys are configured. The keys themselves are never sent back."""
+    return jsonify(success=True, **_key_status())
+
+
+@api.route("/keys", methods=["POST"])
+@admin_required
+def keys_update():
+    """Body: any of {tmdb_api_key, opensubtitles_api_key, opensubtitles_username, opensubtitles_password}
+    plus optional remove: ["opensubtitles"]. Every new key is tested before it is saved."""
+    body = _body()
+    svc = services()
+    value = lambda name: (
+        (body.get(name) or "").strip() if isinstance(body.get(name), str) else ""
+    )  # noqa: E731
+    changes: dict[str, str] = {}
+
+    tmdb_key = value("tmdb_api_key")
+    if tmdb_key:
+        try:
+            if not svc.tmdb.check_key(tmdb_key):
+                return jsonify(
+                    success=False, field="tmdb", error=t("key_invalid", name="TMDB")
+                ), 400
+        except TMDBError:
+            return jsonify(
+                success=False, field="tmdb", error=t("key_unreachable", name="TMDB")
+            ), 502
+        changes["TMDB_API_KEY"] = tmdb_key
+
+    os_key = value("opensubtitles_api_key") or config.OPENSUBTITLES_API_KEY
+    if value("opensubtitles_api_key"):
+        try:
+            if not svc.subtitles.api.check_key(os_key):
+                return jsonify(
+                    success=False,
+                    field="opensubtitles",
+                    error=t("key_invalid", name="OpenSubtitles"),
+                ), 400
+        except requests.RequestException:
+            return jsonify(
+                success=False,
+                field="opensubtitles",
+                error=t("key_unreachable", name="OpenSubtitles"),
+            ), 502
+        changes["OPENSUBTITLES_API_KEY"] = os_key
+
+    username, password = (
+        value("opensubtitles_username"),
+        value("opensubtitles_password"),
+    )
+    if username and password:
+        if not os_key:
+            return jsonify(success=False, field="login", error=t("key_needs_api")), 400
+        try:
+            if not svc.subtitles.api.check_login(os_key, username, password):
+                return jsonify(
+                    success=False, field="login", error=t("login_invalid")
+                ), 400
+        except requests.RequestException:
+            return jsonify(
+                success=False,
+                field="login",
+                error=t("key_unreachable", name="OpenSubtitles"),
+            ), 502
+        changes.update(OPENSUBTITLES_USERNAME=username, OPENSUBTITLES_PASSWORD=password)
+
+    if "opensubtitles" in (body.get("remove") or []):
+        changes.update(
+            OPENSUBTITLES_API_KEY="",
+            OPENSUBTITLES_USERNAME="",
+            OPENSUBTITLES_PASSWORD="",
+        )
+
+    if changes:
+        config.save_settings(changes)
+        svc.apply_keys()
+        logger.info("API keys updated: %s", ", ".join(sorted(changes)))
+    return jsonify(success=True, **_key_status())
+
+
+@api.route("/admin/login", methods=["POST"])
+def admin_login():
+    body = _body()
+    ok, error = auth.login(
+        str(body.get("username") or ""), str(body.get("password") or "")
+    )
+    if not ok:
+        return jsonify(success=False, error=error), 401
+    return jsonify(success=True, default_password=auth.using_default())
+
+
+@api.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    auth.logout()
+    return jsonify(success=True)
+
+
+@api.route("/admin/credentials", methods=["POST"])
+@admin_required
+def admin_credentials():
+    """Body: {current_password, username?, new_password}"""
+    body = _body()
+    current = str(body.get("current_password") or "")
+    new_username = str(body.get("username") or "").strip() or auth.username()
+    new_password = str(body.get("new_password") or "")
+    if not auth.verify(auth.username(), current):
+        return jsonify(success=False, error=t("password_current_wrong")), 400
+    if len(new_password) < 8:
+        return jsonify(success=False, error=t("password_too_short")), 400
+    if new_password == auth.DEFAULT_PASSWORD:
+        return jsonify(success=False, error=t("password_is_default")), 400
+    auth.change_credentials(new_username, new_password)
+    logger.info("Admin credentials changed")
+    return jsonify(success=True, username=new_username)
 
 
 @api.route("/healthz")

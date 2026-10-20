@@ -34,6 +34,8 @@ services:
     environment:
       - TORRSERVER_URL=http://127.0.0.1:8090
       - SUBTITLE_CACHE_DIR=/app/cache/subtitles
+      # API keys and the admin login set on the web Settings page (survives updates)
+      - SETTINGS_FILE=/app/cache/settings.env
     volumes:
       - ./data/cache:/app/cache
     depends_on:

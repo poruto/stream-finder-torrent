@@ -1978,6 +1978,25 @@ select option:checked {
 
 /* =================================================================== settings */
 
+.setup-note { margin-bottom: 20px; padding: 14px 16px; border-radius: 8px; background: rgba(245, 197, 24, 0.12); color: var(--text); }
+.keys { margin-bottom: 32px; }
+.keys-title { font-size: 20px; font-weight: 700; }
+.key-form { display: grid; gap: 8px; padding: 16px; border-radius: 8px; background: var(--surface); }
+.key-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.key-state { font-size: 13px; font-weight: 600; color: var(--text-3); }
+.key-state[data-ok="true"] { color: var(--good); }
+.key-state[data-ok="false"] { color: var(--ok); }
+.key-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-row input { flex: 1 1 200px; }
+.key-row .btn { padding: 9px 18px; font-size: 15px; }
+.key-login summary { cursor: pointer; font-size: 14px; color: var(--text-2); padding: 4px 0; }
+.key-login .key-row { margin-top: 8px; }
+.key-remove { justify-self: start; padding: 0; border: 0; background: none; color: var(--text-3); font-size: 13px; text-decoration: underline; cursor: pointer; }
+.key-message { min-height: 1.2em; font-size: 14px; color: var(--text-2); }
+.key-message.ok { color: var(--good); }
+.key-message.bad { color: var(--bad); }
+
+
 .settings {
   display: grid;
   gap: 28px;

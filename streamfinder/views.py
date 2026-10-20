@@ -16,6 +16,7 @@ from flask import (
     url_for,
 )
 
+from . import auth, config
 from .i18n import COOKIE, LANGUAGES, plural, t
 from .matching import normalize_title
 from .services import services
@@ -23,6 +24,16 @@ from .subtitles import LANGUAGE_NAMES
 from .tmdb import image_url, trailer_url
 
 web = Blueprint("web", __name__)
+
+# Pages that work without a TMDB key (everything else needs it).
+_NO_KEY_ENDPOINTS = {"web.settings", "web.status", "web.set_language"}
+
+
+@web.before_request
+def require_tmdb_key():
+    if not config.TMDB_API_KEY and request.endpoint not in _NO_KEY_ENDPOINTS:
+        return redirect(url_for("web.settings", setup=1))
+
 
 MEDIA_SLUG = {"movie": "film", "tv": "serial"}
 # CJK, Hangul, Cyrillic, Arabic, Thai... – titles TMDB has no Czech/English name for.
@@ -453,7 +464,13 @@ def season_episodes(tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
 @web.route("/settings")
 def settings():
     return render_template(
-        "settings.html", all_languages=LANGUAGE_NAMES, ui_languages=LANGUAGES
+        "settings.html",
+        all_languages=LANGUAGE_NAMES,
+        ui_languages=LANGUAGES,
+        setup=bool(request.args.get("setup")),
+        is_admin=auth.is_admin(),
+        default_password=auth.using_default(),
+        admin_username=auth.username(),
     )
 
 
@@ -474,7 +491,13 @@ def status():
 # -- old URLs, kept so bookmarks keep working ----------------------------------
 
 # Czech paths used before the URLs were switched to English.
-_RENAMED = {"/filmy": "/movies", "/serialy": "/shows", "/hledat": "/search", "/nastaveni": "/settings", "/stav": "/status"}
+_RENAMED = {
+    "/filmy": "/movies",
+    "/serialy": "/shows",
+    "/hledat": "/search",
+    "/nastaveni": "/settings",
+    "/stav": "/status",
+}
 
 
 def _moved(path: str):
@@ -484,7 +507,9 @@ def _moved(path: str):
 
 
 for _old, _new in _RENAMED.items():
-    web.add_url_rule(_old, f"legacy{_old.replace('/', '_')}", lambda _new=_new: _moved(_new))
+    web.add_url_rule(
+        _old, f"legacy{_old.replace('/', '_')}", lambda _new=_new: _moved(_new)
+    )
 
 
 @web.route("/film/<int:tmdb_id>")
@@ -495,7 +520,6 @@ def legacy_movie(tmdb_id: int):
 @web.route("/serial/<int:tmdb_id>")
 def legacy_show(tmdb_id: int):
     return _moved(f"/show/{tmdb_id}")
-
 
 
 @web.route("/title/<media_type>/<int:tmdb_id>")

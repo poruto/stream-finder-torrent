@@ -31,6 +31,36 @@ class OpenSubtitlesClient:
             {"Api-Key": api_key, "User-Agent": user_agent, "Accept": "application/json"}
         )
 
+    def configure(self, api_key: str, username: str = "", password: str = "") -> None:
+        """Switch to new credentials (from the Settings page)."""
+        with self._lock:
+            self.api_key, self.username, self.password = api_key, username, password
+            self.token = None
+            self.base_url = self.BASE_URL
+            self.session.headers["Api-Key"] = api_key
+
+    def check_key(self, api_key: str) -> bool:
+        """Whether OpenSubtitles accepts this API key (/infos/* answers without one, /subtitles doesn't)."""
+        response = requests.get(
+            f"{self.BASE_URL}/subtitles",
+            params=[("languages", "en"), ("query", "matrix")],
+            headers={
+                "Api-Key": api_key,
+                "User-Agent": self.session.headers["User-Agent"],
+            },
+            timeout=15,
+        )
+        return response.status_code == 200
+
+    def check_login(self, api_key: str, username: str, password: str) -> bool:
+        response = self.session.post(
+            f"{self.BASE_URL}/login",
+            headers={"Api-Key": api_key},
+            json={"username": username, "password": password},
+            timeout=15,
+        )
+        return response.status_code == 200
+
     @property
     def enabled(self) -> bool:
         return bool(self.api_key)

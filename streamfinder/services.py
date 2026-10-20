@@ -36,6 +36,16 @@ class Services:
             transcoder=Transcoder(),
         )
 
+    def apply_keys(self) -> None:
+        """Use keys changed on the Settings page without a restart."""
+        self.tmdb.api_key = config.TMDB_API_KEY
+        self.tmdb.clear_cache()
+        self.subtitles.api.configure(
+            config.OPENSUBTITLES_API_KEY,
+            config.OPENSUBTITLES_USERNAME,
+            config.OPENSUBTITLES_PASSWORD,
+        )
+
 
 def services() -> Services:
     return current_app.extensions["streamfinder"]

@@ -216,6 +216,93 @@
     });
   }
 
+  // ---------------------------------------------------------- API keys (Settings page)
+  // Keys are write-only: the server only reports whether each one is set.
+  const keysSection = document.getElementById("keys");
+  if (keysSection) {
+    const renderState = (state) => {
+      for (const badge of keysSection.querySelectorAll(".key-state")) {
+        const ok = Boolean(state[badge.dataset.key]);
+        badge.textContent = ok ? t("key_set") : t("key_missing");
+        badge.dataset.ok = String(ok);
+      }
+      const remove = keysSection.querySelector("[data-remove]");
+      if (remove) remove.hidden = !state.opensubtitles;
+    };
+    SF.api("/api/keys").then(renderState).catch(() => {});
+
+    const submit = async (form, body) => {
+      const message = form.querySelector(".key-message");
+      const button = form.querySelector("button[type=submit]");
+      button.disabled = true;
+      message.className = "key-message";
+      message.textContent = t("key_checking");
+      try {
+        const state = await SF.api("/api/keys", body);
+        renderState(state);
+        form.reset();
+        message.className = "key-message ok";
+        message.textContent = t("key_saved");
+        if (form.dataset.field === "tmdb" && new URLSearchParams(location.search).get("setup")) {
+          setTimeout(() => (location.href = "/"), 900);
+        }
+      } catch (error) {
+        message.className = "key-message bad";
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    for (const form of keysSection.querySelectorAll(".key-form")) {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const body = Object.fromEntries([...new FormData(form)].filter(([, v]) => String(v).trim()));
+        if (!Object.keys(body).length) return;
+        submit(form, body);
+      });
+    }
+    keysSection.querySelector("[data-remove]")?.addEventListener("click", (event) => {
+      const form = event.target.closest(".key-form");
+      if (confirm(t("key_remove_confirm"))) submit(form, { remove: ["opensubtitles"] });
+    });
+  }
+
+  // ---------------------------------------------------------- admin login (Settings page)
+  const loginForm = document.getElementById("admin-login");
+  const formMessage = (form, text, kind = "") => {
+    const node = form.querySelector(".key-message");
+    node.className = `key-message ${kind}`.trim();
+    node.textContent = text;
+  };
+  loginForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formMessage(loginForm, t("loading"));
+    try {
+      await SF.api("/api/admin/login", Object.fromEntries(new FormData(loginForm)));
+      location.reload();
+    } catch (error) {
+      formMessage(loginForm, error.message, "bad");
+    }
+  });
+  document.getElementById("admin-logout")?.addEventListener("click", async () => {
+    await SF.api("/api/admin/logout", {}).catch(() => {});
+    location.reload();
+  });
+  const credentialsForm = document.getElementById("admin-credentials");
+  credentialsForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(credentialsForm));
+    if (data.new_password !== data.repeat) return formMessage(credentialsForm, t("password_mismatch"), "bad");
+    try {
+      await SF.api("/api/admin/credentials", data);
+      formMessage(credentialsForm, t("password_changed"), "ok");
+      setTimeout(() => location.reload(), 1200);
+    } catch (error) {
+      formMessage(credentialsForm, error.message, "bad");
+    }
+  });
+
   // ---------------------------------------------------------- navigation
   const nav = document.getElementById("nav");
   const onScroll = () => nav.classList.toggle("is-solid", window.scrollY > 40);

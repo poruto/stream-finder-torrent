@@ -25,8 +25,9 @@ fi
 
 if [ ! -f .env ]; then
   cp .env.example .env
-  read -r -p "TMDB API key (https://www.themoviedb.org/settings/api): " tmdb_key </dev/tty
-  read -r -p "OpenSubtitles API key (optional, Enter to skip): " os_key </dev/tty
+  echo "API keys can also be entered later on the web: Settings (login admin / admin)."
+  read -r -p "TMDB API key (Enter = later on the web): " tmdb_key </dev/tty || tmdb_key=""
+  read -r -p "OpenSubtitles API key (optional, Enter to skip): " os_key </dev/tty || os_key=""
   sed -i "s|^TMDB_API_KEY=.*|TMDB_API_KEY=${tmdb_key}|" .env
   sed -i "s|^OPENSUBTITLES_API_KEY=.*|OPENSUBTITLES_API_KEY=${os_key}|" .env
   sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')|" .env

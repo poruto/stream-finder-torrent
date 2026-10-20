@@ -3,6 +3,87 @@
 {% block content %}
   <div class="page page-narrow">
     <header class="page-head"><h1>{{ t('settings_title') }}</h1></header>
+    {% if setup %}
+      <p class="setup-note">{{ t('setup_needed') }}</p>
+    {% endif %}
+
+    <section class="setting keys" id="keys" aria-labelledby="keys-title">
+      <h2 class="keys-title" id="keys-title">{{ t('admin_legend') }}</h2>
+      {% if not is_admin %}
+        <p class="muted">{{ t('admin_login_help') }}</p>
+        <form class="key-form" id="admin-login">
+          <div class="key-row">
+            <label class="sr-only" for="admin-user">{{ t('key_username') }}</label>
+            <input id="admin-user" name="username" type="text" autocomplete="username" placeholder="{{ t('key_username') }}" value="{{ admin_username if default_password else '' }}" required>
+            <label class="sr-only" for="admin-pass">{{ t('key_password') }}</label>
+            <input id="admin-pass" name="password" type="password" autocomplete="current-password" placeholder="{{ t('key_password') }}" required>
+            <button class="btn btn-play" type="submit">{{ t('admin_login') }}</button>
+          </div>
+          {% if default_password %}<p class="muted">{{ t('admin_default_hint') }}</p>{% endif %}
+          <p class="key-message" aria-live="polite"></p>
+        </form>
+      {% else %}
+        {% if default_password %}<p class="setup-note">{{ t('admin_change_default') }}</p>{% endif %}
+        <p class="muted">{{ t('keys_help') }}</p>
+      <form class="key-form" data-field="tmdb">
+        <div class="key-head">
+          <strong>TMDB</strong>
+          <span class="key-state" data-key="tmdb"></span>
+        </div>
+        <p class="muted">{{ t('key_tmdb_help', link='<a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org</a>') | safe }}</p>
+        <div class="key-row">
+          <label class="sr-only" for="key-tmdb">TMDB API key</label>
+          <input id="key-tmdb" name="tmdb_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="{{ t('key_placeholder') }}">
+          <button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button>
+        </div>
+        <p class="key-message" aria-live="polite"></p>
+      </form>
+
+      <form class="key-form" data-field="opensubtitles">
+        <div class="key-head">
+          <strong>OpenSubtitles</strong>
+          <span class="key-state" data-key="opensubtitles"></span>
+        </div>
+        <p class="muted">{{ t('key_os_help', link='<a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noopener">opensubtitles.com</a>') | safe }}</p>
+        <div class="key-row">
+          <label class="sr-only" for="key-os">OpenSubtitles API key</label>
+          <input id="key-os" name="opensubtitles_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="{{ t('key_placeholder') }}">
+          <button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button>
+        </div>
+        <details class="key-login">
+          <summary>{{ t('key_login') }} <span class="key-state" data-key="opensubtitles_login"></span></summary>
+          <div class="key-row">
+            <label class="sr-only" for="key-os-user">{{ t('key_username') }}</label>
+            <input id="key-os-user" name="opensubtitles_username" type="text" autocomplete="off" placeholder="{{ t('key_username') }}">
+            <label class="sr-only" for="key-os-pass">{{ t('key_password') }}</label>
+            <input id="key-os-pass" name="opensubtitles_password" type="password" autocomplete="new-password" placeholder="{{ t('key_password') }}">
+          </div>
+        </details>
+        <button class="key-remove" type="button" data-remove="opensubtitles" hidden>{{ t('key_remove') }}</button>
+        <p class="key-message" aria-live="polite"></p>
+      </form>
+
+        <form class="key-form" id="admin-credentials">
+          <div class="key-head"><strong>{{ t('admin_account') }}</strong></div>
+          <div class="key-row">
+            <label class="sr-only" for="cred-user">{{ t('key_username') }}</label>
+            <input id="cred-user" name="username" type="text" autocomplete="username" value="{{ admin_username }}" required>
+            <label class="sr-only" for="cred-current">{{ t('password_current') }}</label>
+            <input id="cred-current" name="current_password" type="password" autocomplete="current-password" placeholder="{{ t('password_current') }}" required>
+          </div>
+          <div class="key-row">
+            <label class="sr-only" for="cred-new">{{ t('password_new') }}</label>
+            <input id="cred-new" name="new_password" type="password" autocomplete="new-password" minlength="8" placeholder="{{ t('password_new') }}" required>
+            <label class="sr-only" for="cred-repeat">{{ t('password_repeat') }}</label>
+            <input id="cred-repeat" name="repeat" type="password" autocomplete="new-password" minlength="8" placeholder="{{ t('password_repeat') }}" required>
+            <button class="btn btn-ghost" type="submit">{{ t('password_change') }}</button>
+          </div>
+          <p class="key-message" aria-live="polite"></p>
+        </form>
+        <button class="key-remove" type="button" id="admin-logout">{{ t('admin_logout') }}</button>
+      {% endif %}
+    </section>
+
     <form class="settings" id="settings-form">
       <fieldset class="setting">
         <legend>{{ t('ui_language') }}</legend>

@@ -2,12 +2,17 @@
 
 import logging
 import os
+import re
 
 from dotenv import load_dotenv
 
 # Project root (one level above the package): holds .env and the cache directory.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
+# API keys entered on the Settings page are stored here (Docker: a file on the data volume).
+SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, ".env"))
+if os.path.abspath(SETTINGS_FILE) != os.path.abspath(os.path.join(BASE_DIR, ".env")):
+    load_dotenv(SETTINGS_FILE, override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -76,5 +81,50 @@ SECRET_KEY = os.getenv("SECRET_KEY", "") or os.urandom(32).hex()
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = _env_int("PORT", 5000)
 
+# Keys that can be changed at runtime from the Settings page.
+EDITABLE_KEYS = (
+    "TMDB_API_KEY",
+    "OPENSUBTITLES_API_KEY",
+    "OPENSUBTITLES_USERNAME",
+    "OPENSUBTITLES_PASSWORD",
+)
+
+
+def _quote(value: str) -> str:
+    """Single-quote values with characters python-dotenv would interpret ($ in password hashes)."""
+    return (
+        value
+        if re.fullmatch(r"[\w.@:/+-]*", value)
+        else "'" + value.replace("'", "") + "'"
+    )
+
+
+def save_settings(changes: dict[str, str]) -> None:
+    """Write keys to SETTINGS_FILE (other lines are kept) and apply them to this module."""
+    lines = []
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    pending = dict(changes)
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key in pending:
+            lines[i] = f"{key}={_quote(pending.pop(key))}"
+    lines += [f"{key}={_quote(value)}" for key, value in pending.items()]
+    os.makedirs(os.path.dirname(os.path.abspath(SETTINGS_FILE)), exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, SETTINGS_FILE)
+    for key, value in changes.items():
+        os.environ[key] = value
+        globals()[key] = value
+
+
+# Admin account for the Settings page (admin / admin until changed there).
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "").strip()
+
 if not TMDB_API_KEY:
-    logger.error("TMDB_API_KEY is not set - copy .env.example to .env and fill it in")
+    logger.warning("TMDB_API_KEY is not set yet - enter it on the Settings page")

@@ -60,6 +60,22 @@ class TMDBClient:
             self._cache[key] = (time.monotonic() + ttl, data)
         return data
 
+    def clear_cache(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    def check_key(self, api_key: str) -> bool:
+        """Whether TMDB accepts this API key."""
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/configuration",
+                params={"api_key": api_key},
+                timeout=10,
+            )
+        except requests.RequestException:
+            raise TMDBError("TMDB unreachable") from None
+        return response.status_code == 200
+
     # -- lists ------------------------------------------------------------
 
     def search_multi(self, query: str, page: int = 1) -> dict[str, Any]:

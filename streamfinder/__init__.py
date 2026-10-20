@@ -11,16 +11,21 @@ from .services import Services
 from .tmdb import TMDBError
 
 
-def create_app() -> Flask:
+def create_app(testing: bool = False) -> Flask:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     app = Flask(__name__)
     app.config["SECRET_KEY"] = config.SECRET_KEY
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        PERMANENT_SESSION_LIFETIME=30 * 86400,
+    )
     app.json.sort_keys = False
     services = Services.create()
     # With the debug reloader only the child process (WERKZEUG_RUN_MAIN) serves requests.
-    if not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    if not testing and (not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         services.imdb.start()
     app.extensions["streamfinder"] = services
 
