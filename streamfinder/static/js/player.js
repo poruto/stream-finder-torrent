@@ -1041,7 +1041,7 @@
     name = name ? name[0].toUpperCase() + name.slice(1) : t("audio_track_n", { n: i + 1 });
     const channels = track.channels ? (track.channels >= 6 ? "5.1" : track.channels === 2 ? "stereo" : `${track.channels} ch`) : "";
     const detail = [track.title, (track.codec || "").toUpperCase(), channels].filter(Boolean).join(" · ");
-    return { name, detail };
+    return { name, detail, code: short };
   }
 
   function renderAudioMenu() {
@@ -1054,11 +1054,16 @@
     $("audio-label").textContent = audioLabel(tracks[active], active).name;
     $("audio-options").replaceChildren(
       ...tracks.map((track, i) => {
-        const { name, detail } = audioLabel(track, i);
+        const { name, detail, code } = audioLabel(track, i);
+        // Same three columns as the subtitle options: check, flag, text.
         const option = el(
           "button",
           { type: "button", className: "subs-option", role: "menuitemradio", "aria-checked": String(i === active) },
-          [icon("check"), el("span", {}, [el("strong", {}, [name]), detail ? el("small", {}, [detail]) : null])],
+          [
+            icon("check"),
+            code ? SF.flag(code) : el("span", { className: "flag flag-none" }),
+            el("span", { className: "subs-text" }, [el("strong", {}, [name]), detail ? el("small", {}, [detail]) : null]),
+          ],
         );
         option.addEventListener("click", () => switchAudio(i));
         return option;
@@ -2090,8 +2095,10 @@
     cue.orig ??= [cue.startTime, cue.endTime];
     const scale = state.subSync?.scale || 1;
     const shift = (state.subSync?.offset || 0) + state.subOffset - (converted()?.offset || 0);
-    cue.startTime = Math.max(0, cue.orig[0] * scale + shift);
-    cue.endTime = Math.max(0, cue.orig[1] * scale + shift);
+    // Not clamped to 0: after a seek in a converted stream the lines before its start
+    // would all pile up at 0:00. Negative times are simply never shown.
+    cue.startTime = cue.orig[0] * scale + shift;
+    cue.endTime = cue.orig[1] * scale + shift;
   }
 
   // ------------------------------------------------------------- AI subtitles
