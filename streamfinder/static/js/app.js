@@ -563,7 +563,7 @@
 
   // ---------------------------------------------------------- poster markup (JS-rendered grids)
   SF.poster = (item) =>
-    SF.el("a", { className: "poster", href: item.url }, [
+    SF.el("a", { className: "poster", href: item.url, dataset: { id: item.id, type: item.type } }, [
       SF.el("img", {
         src: item.poster,
         alt: "",
@@ -879,9 +879,10 @@
         },
         [SF.icon("close")],
       );
+      const [type, id] = key.split(":");
       const cardNode = SF.el(
         "a",
-        { className: "wide-card", href: `${p.url}?play=1` },
+        { className: "wide-card", href: `${p.url}?play=1`, dataset: { id, type } },
         [
           p.backdrop
             ? SF.el("img", { src: p.backdrop, alt: "", loading: "lazy" })
@@ -923,10 +924,41 @@
       .replaceChildren(...items.map(SF.poster));
     listRow.hidden = !items.length;
   }
-  if (continueRow) renderContinue();
-  if (listRow) renderList();
-  document.addEventListener("sf:shared", () => {
+  // "New episode" on shows being watched or in My list: one aired in the last 30 days
+  // that comes after the last episode watched (on any device).
+  const NEW_FOR = 30 * 86400 * 1000;
+  const episodeNumber = (season, episode) => season * 10000 + episode;
+  function watchedUpTo(p) {
+    const seen = Object.keys(p.episodes || {}).map((k) => k.split("x").map(Number));
+    if (p.season) seen.push([p.season, p.episode]);
+    return Math.max(0, ...seen.map(([s, e]) => episodeNumber(s, e)));
+  }
+  async function markNewEpisodes() {
+    const shows = new Map(); // id -> last watched episode number
+    for (const [key, p] of Object.entries(SF.progress.all())) if (key.startsWith("tv:")) shows.set(key.slice(3), watchedUpTo(p));
+    for (const item of SF.myList.all()) if (item.type === "tv" && !shows.has(String(item.id))) shows.set(String(item.id), 0);
+    if (!shows.size) return;
+    let data;
+    try {
+      data = await SF.api(`/api/new-episodes?ids=${[...shows.keys()].join(",")}`);
+    } catch {
+      return;
+    }
+    for (const [id, last] of Object.entries(data.latest || {})) {
+      const aired = Date.parse(last.air_date || "");
+      if (!(aired > Date.now() - NEW_FOR) || episodeNumber(last.season, last.episode) <= shows.get(id)) continue;
+      for (const card of document.querySelectorAll(`[data-type="tv"][data-id="${id}"]`)) {
+        if (card.querySelector(".new-badge")) continue;
+        card.append(SF.el("span", { className: "new-badge", title: t("season_episode", { s: last.season, e: last.episode }) }, [t("new_episode")]));
+      }
+    }
+  }
+
+  function renderHome() {
     if (continueRow) renderContinue();
     if (listRow) renderList();
-  });
+    markNewEpisodes();
+  }
+  renderHome();
+  document.addEventListener("sf:shared", renderHome);
 })();

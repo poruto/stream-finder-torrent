@@ -784,6 +784,21 @@ select option:checked {
   transform: scale(1.04);
 }
 
+/* "New episode" on a show's poster or continue-watching card */
+.new-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
 .wide-card {
   position: relative;
   display: block;

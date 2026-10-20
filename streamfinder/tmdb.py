@@ -151,6 +151,22 @@ class TMDBClient:
 
     # -- details ----------------------------------------------------------
 
+    def latest_episode(self, tmdb_id: int) -> dict[str, Any] | None:
+        """A show's last aired episode {season, episode, air_date} (specials don't count)."""
+        last = (
+            self._get(f"/tv/{tmdb_id}", ttl=6 * 3600, language="en-US").get(
+                "last_episode_to_air"
+            )
+            or {}
+        )
+        if not last.get("season_number") or not last.get("episode_number"):
+            return None
+        return {
+            "season": last["season_number"],
+            "episode": last["episode_number"],
+            "air_date": last.get("air_date"),
+        }
+
     def details(self, media_type: str, tmdb_id: int) -> dict[str, Any]:
         """Movie/TV details incl. credits, ids, trailers and recommendations.
 

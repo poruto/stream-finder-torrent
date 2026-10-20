@@ -56,3 +56,14 @@ def test_two_devices_share_progress_and_list(client):
     assert phone["progress"]["movie:1"]["position"] == 600
     assert [i["key"] for i in phone["list"]] == ["tv:5"]
     assert client.get("/api/shared").get_json()["progress"]["movie:1"]["title"] == "Dune"
+
+
+def test_new_episodes_lists_each_shows_last_episode(client, monkeypatch):
+    from streamfinder.services import services
+
+    with client.application.app_context():
+        tmdb = services().tmdb
+    latest = {1: {"season": 2, "episode": 5, "air_date": "2026-10-01"}, 2: None}
+    monkeypatch.setattr(tmdb, "latest_episode", lambda tmdb_id: latest.get(tmdb_id))
+    data = client.get("/api/new-episodes?ids=1,2,x").get_json()
+    assert data["latest"] == {"1": latest[1]}

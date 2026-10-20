@@ -12,10 +12,13 @@ import os
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, jsonify, request
 
 from . import config
+from .services import services
+from .tmdb import TMDBError
 
 logger = logging.getLogger(__name__)
 
@@ -119,3 +122,20 @@ def shared_state():
                     logger.warning("shared state not saved: %s", e)
             data = merged
     return _response(data)
+
+
+@shared.route("/api/new-episodes")
+def new_episodes():
+    """?ids=1,2,3 (TMDB show ids): each show's last aired episode, for "New episode" badges."""
+    ids = [int(i) for i in request.args.get("ids", "").split(",") if i.isdigit()][:40]
+    tmdb = services().tmdb
+
+    def latest(tmdb_id: int):
+        try:
+            return tmdb_id, tmdb.latest_episode(tmdb_id)
+        except TMDBError:
+            return tmdb_id, None
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        found = dict(pool.map(latest, ids))
+    return jsonify(success=True, latest={str(k): v for k, v in found.items() if v})
