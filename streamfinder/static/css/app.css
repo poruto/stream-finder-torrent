@@ -405,6 +405,17 @@ input[type="text"] {
 }
 select {
   cursor: pointer;
+  color-scheme: dark;
+}
+/* The opened list is drawn by the OS from the option colours; a transparent or white
+   select would otherwise show grey text on a white list (Chrome on Windows). */
+select option,
+select optgroup {
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+select option:checked {
+  background-color: var(--surface-3);
 }
 /* Inputs living inside a styled pill draw no box of their own. */
 .nav-search input[type="search"],
@@ -1078,11 +1089,27 @@ select {
   height: 100%;
   object-fit: cover;
 }
-.thumb-blank { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-3); }
-.thumb-blank .icon { width: 34px; height: 34px; }
+.thumb-blank {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+.thumb-blank .icon {
+  width: 34px;
+  height: 34px;
+}
 .release-badge {
-  position: absolute; left: 6px; bottom: 6px; padding: 2px 8px; border-radius: 4px;
-  background: rgba(0, 0, 0, 0.75); font-size: 12px; font-weight: 600; color: var(--ok);
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok);
 }
 .episode-thumb .progress {
   position: absolute;
@@ -1481,7 +1508,9 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.subs-autosync { justify-self: start; }
+.subs-autosync {
+  justify-self: start;
+}
 .subs-sync {
   display: flex;
   align-items: center;
@@ -2021,7 +2050,11 @@ select {
   padding: 10px 16px;
   cursor: pointer;
 }
-.toggle small { display: block; margin-top: 2px; font-size: 13px; }
+.toggle small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
 .toggle input {
   width: 18px;
   height: 18px;
