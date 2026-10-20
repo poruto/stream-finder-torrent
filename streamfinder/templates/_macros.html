@@ -1,5 +1,5 @@
 {% macro poster(item, eager=false) -%}
-<a class="poster" href="{{ item.url }}" data-id="{{ item.id }}" data-type="{{ item.type }}">
+<a class="poster{% if item.current %} is-current{% endif %}" href="{{ item.url }}" data-id="{{ item.id }}" data-type="{{ item.type }}"{% if item.current %} aria-current="page"{% endif %}>
   <img src="{{ item.poster }}" alt="" {% if not eager %}loading="lazy"{% endif %} decoding="async" width="342" height="513">
   {% if item.imdb %}<span class="poster-badge" title="IMDb">IMDb {{ item.imdb }}</span>{% endif %}
   {% if item.coming %}<span class="coming-badge">{{ item.coming }}</span>{% endif %}

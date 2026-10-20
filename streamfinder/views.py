@@ -1,5 +1,6 @@
 """HTML pages and the presentation helpers shared with the JSON API."""
 
+import logging
 import math
 import re
 import time
@@ -21,8 +22,9 @@ from .i18n import COOKIE, LANGUAGES, current_language, plural, t
 from .matching import normalize_title
 from .services import services
 from .subtitles import LANGUAGE_NAMES
-from .tmdb import image_url, trailer_url
+from .tmdb import TMDBError, image_url, trailer_url
 
+logger = logging.getLogger(__name__)
 web = Blueprint("web", __name__)
 
 # Pages that work without a TMDB key (everything else needs it).
@@ -414,9 +416,32 @@ def _detail_context(media_type: str, tmdb_id: int) -> dict[str, Any]:
     }
 
 
+def collection_row(data: dict[str, Any], tmdb_id: int) -> dict[str, Any] | None:
+    """The film series a movie belongs to, oldest part first, the movie itself marked."""
+    info = data.get("belongs_to_collection") or {}
+    if not info.get("id"):
+        return None
+    try:
+        collection = services().tmdb.collection(info["id"])
+    except TMDBError as e:
+        logger.info("%s", e)
+        return None
+    parts = sorted(
+        collection.get("parts") or [],
+        key=lambda p: (not p.get("release_date"), p.get("release_date") or ""),
+    )
+    items = cards(parts, "movie")
+    if len(items) < 2:
+        return None
+    for item in items:
+        item["current"] = item["id"] == tmdb_id
+    return {"title": collection.get("name") or info.get("name") or "", "items": items}
+
+
 @web.route("/movie/<int:tmdb_id>")
 def movie(tmdb_id: int):
     context = _detail_context("movie", tmdb_id)
+    collection = collection_row(context["raw"], tmdb_id)
     player = {
         "media_type": "movie",
         "tmdb_id": tmdb_id,
@@ -429,7 +454,9 @@ def movie(tmdb_id: int):
         "released": context["released"],
         "convert": services().transcoder.available,
     }
-    return render_template("detail.html", player=player, **context)
+    return render_template(
+        "detail.html", player=player, collection=collection, **context
+    )
 
 
 @web.route("/show/<int:tmdb_id>")
@@ -446,7 +473,8 @@ def show(tmdb_id: int):
         if s.get("season_number") is not None and (s.get("episode_count") or 0) > 0
     ]
     seasons.sort(key=lambda s: (s["number"] == 0, s["number"]))  # specials last
-    requested = request.args.get("season", type=int)
+    # ?s=2&e=1 (an "Up next" card) opens the season of that episode.
+    requested = request.args.get("season", type=int) or request.args.get("s", type=int)
     current = (
         requested
         if any(s["number"] == requested for s in seasons)

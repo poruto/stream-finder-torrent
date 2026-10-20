@@ -818,6 +818,62 @@ select option:checked {
   pointer-events: none;
 }
 
+/* "New episode S3:E1 on 12 Nov": the next episode of a show being watched isn't out yet */
+.next-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  max-width: calc(100% - 16px);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* A tick on watched films and episodes */
+.watched-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--good);
+  pointer-events: none;
+}
+.watched-badge .icon {
+  width: 16px;
+  height: 16px;
+}
+.episode-thumb .watched-badge {
+  top: 6px;
+  right: 6px;
+}
+
+/* The film whose page this is, in its collection's row */
+.poster.is-current img {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--text);
+}
+
+/* Rows drawn by the browser ("Because you watched…") sit in the page's grid of rows */
+.rows-group {
+  display: contents;
+}
+
 .wide-card {
   position: relative;
   display: block;
@@ -1356,6 +1412,39 @@ select option:checked {
 .episode-more:hover {
   border-color: rgba(255, 255, 255, 0.5);
   color: var(--text);
+}
+.episode-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.episode-watched {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.episode-watched .icon {
+  width: 18px;
+  height: 18px;
+}
+.episode-watched:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: var(--text);
+}
+.episode-watched[aria-pressed="true"] {
+  border-color: var(--text);
+  background: var(--text);
+  color: #000;
+}
+.episode-watched:disabled {
+  cursor: default;
 }
 
 .cast-list {
@@ -2839,7 +2928,7 @@ select option:checked {
   .episode-num {
     display: none;
   }
-  .episode-more {
+  .episode-actions {
     grid-column: 1 / -1;
     justify-self: start;
   }

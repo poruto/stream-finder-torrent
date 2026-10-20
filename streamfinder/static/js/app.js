@@ -158,6 +158,54 @@
     },
   };
 
+  // ---------------------------------------------------------- watched
+  // A film or episode counts as watched from 92 % on: the player resumes below that and
+  // moves on to the next episode above it. "Mark as watched" stores position = duration
+  // (plus `watched: true`) in the progress entry the player writes, so it syncs too.
+  const FINISHED = 0.92;
+  SF.isFinished = (p) => Boolean(p && p.duration && p.position >= p.duration * FINISHED);
+  const episodeOrder = (key) => {
+    const [season, episode] = String(key).split("x").map(Number);
+    return season * 10000 + episode;
+  };
+  // `info`: { title, backdrop, url, runtime (minutes) }; `ep`: { season, episode } or null for a film.
+  SF.setWatched = (key, info, ep, watched) => {
+    const saved = SF.progress.get(key) || {};
+    const { runtime, ...meta } = info;
+    const length = (p) => (p && p.duration) || (runtime ? runtime * 60 : 1);
+    if (!ep) {
+      const duration = length(saved);
+      SF.progress.set(key, watched ? { ...meta, position: duration, duration, watched: true } : { ...meta, position: 0, watched: false });
+      return;
+    }
+    const episodes = { ...(saved.episodes || {}) };
+    const epKey = `${ep.season}x${ep.episode}`;
+    const current = saved.season ? `${saved.season}x${saved.episode}` : null;
+    const update = { ...meta, episodes };
+    // The entry's own season/episode (what "Continue watching" is about) moves to the
+    // furthest episode; the torrent remembered for it only stays when it is a season pack.
+    const pointTo = (to) => {
+      const [season, episode] = to ? to.split("x").map(Number) : [null, null];
+      Object.assign(update, {
+        season,
+        episode,
+        position: to ? episodes[to].position : 0,
+        duration: to ? episodes[to].duration : 0,
+        magnet: saved.pack ? saved.magnet : null,
+        fileIndex: null,
+      });
+    };
+    if (watched) {
+      const duration = length(episodes[epKey]);
+      episodes[epKey] = { position: duration, duration, watched: true };
+      if (!current || episodeOrder(epKey) >= episodeOrder(current)) pointTo(epKey);
+    } else {
+      delete episodes[epKey];
+      if (current === epKey) pointTo(Object.keys(episodes).sort((a, b) => episodeOrder(b) - episodeOrder(a))[0]);
+    }
+    SF.progress.set(key, update);
+  };
+
   // ---------------------------------------------------------- shared between devices
   // Progress and My list are merged with the server's copy (streamfinder/shared.py), so
   // a film started on the TV continues on the phone. Entry by entry the newer one wins.
@@ -875,17 +923,55 @@
   // ---------------------------------------------------------- home: continue watching & my list
   // Drawn again when another device's progress or list arrives.
   const continueRow = document.getElementById("continue-row");
+  // A show whose last episode watched is finished shows the next one ("Up next") instead;
+  // one that isn't out yet leaves the row and is announced on the show's posters.
+  const upNext = new Map(); // "id:season:episode" -> {season, episode, aired, air_date} | null
+  let upNextLoading = false;
+  function showCard(id, p) {
+    if (!p.season) return null;
+    const current = (p.episodes || {})[`${p.season}x${p.episode}`] || p;
+    if (!SF.isFinished(current)) return current.position > 30 ? { resume: current } : null;
+    let last = `${p.season}x${p.episode}`;
+    for (const [key, e] of Object.entries(p.episodes || {})) if (SF.isFinished(e) && episodeOrder(key) > episodeOrder(last)) last = key;
+    return { after: `${id}:${last.replace("x", ":")}` };
+  }
+  async function loadUpNext(ids) {
+    upNextLoading = true;
+    let found = {};
+    try {
+      found = (await SF.api(`/api/next-episode?ids=${ids.join(",")}`)).next || {};
+    } catch {
+      /* offline: these shows simply aren't in the row */
+    }
+    for (const id of ids) upNext.set(id, found[id] || null);
+    upNextLoading = false;
+    renderContinue();
+  }
+  const airDate = (date) => new Date(date).toLocaleDateString(SF.lang);
+
   function renderContinue() {
-    const items = Object.entries(SF.progress.all())
-      .filter(
-        ([, p]) =>
-          p.duration && p.position > 30 && p.position < p.duration * 0.95,
-      )
-      .sort(([, a], [, b]) => b.updated - a.updated)
-      .slice(0, 20);
+    const items = [];
+    const missing = [];
+    const coming = [];
+    for (const [key, p] of Object.entries(SF.progress.all())) {
+      if (!p.duration && !p.episodes) continue;
+      const [type, id] = key.split(":");
+      if (type !== "tv") {
+        if (p.position > 30 && p.position < p.duration * 0.95) items.push([key, p, { resume: p }]);
+        continue;
+      }
+      const card = showCard(id, p);
+      if (!card) continue;
+      if (card.resume) items.push([key, p, card]);
+      else if (!upNext.has(card.after)) missing.push(card.after);
+      else if (upNext.get(card.after)?.aired) items.push([key, p, { next: upNext.get(card.after) }]);
+      else if (upNext.get(card.after)?.air_date) coming.push([id, upNext.get(card.after)]);
+    }
+    if (missing.length && !upNextLoading) loadUpNext(missing);
+    items.sort(([, a], [, b]) => b.updated - a.updated).splice(20);
     const track = document.getElementById("continue-track");
     track.replaceChildren();
-    for (const [key, p] of items) {
+    for (const [key, p, { resume, next }] of items) {
       const remove = SF.el(
         "button",
         {
@@ -898,24 +984,32 @@
       const [type, id] = key.split(":");
       const cardNode = SF.el(
         "a",
-        { className: "wide-card", href: `${p.url}?play=1`, dataset: { id, type } },
+        {
+          className: `wide-card${next ? " is-next" : ""}`,
+          href: next ? `${p.url}?play=1&s=${next.season}&e=${next.episode}` : `${p.url}?play=1`,
+          dataset: { id, type },
+        },
         [
           p.backdrop
             ? SF.el("img", { src: p.backdrop, alt: "", loading: "lazy" })
             : null,
-          SF.el("div", { className: "progress" }, [
-            SF.el("i", {
-              style: `width:${Math.min(100, (p.position / p.duration) * 100)}%`,
-            }),
-          ]),
+          next
+            ? null
+            : SF.el("div", { className: "progress" }, [
+                SF.el("i", {
+                  style: `width:${Math.min(100, (resume.position / resume.duration) * 100)}%`,
+                }),
+              ]),
           SF.el("div", { className: "wide-info" }, [
             SF.el("strong", {}, [p.title]),
             SF.el("span", {}, [
-              p.season
-                ? t("season_episode", { s: p.season, e: p.episode })
-                : t("time_left", {
-                    time: SF.formatTime(p.duration - p.position),
-                  }),
+              next
+                ? t("up_next", { ep: t("ep_short", { s: next.season, e: next.episode }) })
+                : p.season
+                  ? t("season_episode", { s: p.season, e: p.episode })
+                  : t("time_left", {
+                      time: SF.formatTime(p.duration - p.position),
+                    }),
             ]),
           ]),
           remove,
@@ -930,6 +1024,13 @@
       track.append(cardNode);
     }
     continueRow.hidden = !items.length;
+    for (const [id, next] of coming) {
+      const label = t("new_episode_on", { ep: t("ep_short", { s: next.season, e: next.episode }), date: airDate(next.air_date) });
+      for (const poster of document.querySelectorAll(`.poster[data-type="tv"][data-id="${id}"]`)) {
+        if (!poster.querySelector(".coming-badge, .new-badge, .next-badge")) poster.append(SF.el("span", { className: "next-badge" }, [label]));
+      }
+    }
+    applyNewBadges();
   }
 
   const listRow = document.getElementById("mylist-row");
@@ -949,6 +1050,16 @@
     if (p.season) seen.push([p.season, p.episode]);
     return Math.max(0, ...seen.map(([s, e]) => episodeNumber(s, e)));
   }
+  let newBadges = []; // [show id, its new episode], drawn again on cards rendered later
+  function applyNewBadges() {
+    for (const [id, last] of newBadges) {
+      for (const card of document.querySelectorAll(`[data-type="tv"][data-id="${id}"]`)) {
+        if (card.querySelector(".new-badge")) continue;
+        card.querySelector(".next-badge")?.remove();
+        card.append(SF.el("span", { className: "new-badge", title: t("season_episode", { s: last.season, e: last.episode }) }, [t("new_episode")]));
+      }
+    }
+  }
   async function markNewEpisodes() {
     const shows = new Map(); // id -> last watched episode number
     for (const [key, p] of Object.entries(SF.progress.all())) if (key.startsWith("tv:")) shows.set(key.slice(3), watchedUpTo(p));
@@ -960,20 +1071,87 @@
     } catch {
       return;
     }
-    for (const [id, last] of Object.entries(data.latest || {})) {
+    newBadges = Object.entries(data.latest || {}).filter(([id, last]) => {
       const aired = Date.parse(last.air_date || "");
-      if (!(aired > Date.now() - NEW_FOR) || episodeNumber(last.season, last.episode) <= shows.get(id)) continue;
-      for (const card of document.querySelectorAll(`[data-type="tv"][data-id="${id}"]`)) {
-        if (card.querySelector(".new-badge")) continue;
-        card.append(SF.el("span", { className: "new-badge", title: t("season_episode", { s: last.season, e: last.episode }) }, [t("new_episode")]));
+      return aired > Date.now() - NEW_FOR && episodeNumber(last.season, last.episode) > shows.get(id);
+    });
+    applyNewBadges();
+  }
+
+  // A tick on the posters of films watched to the end (or marked as watched).
+  SF.markWatchedPosters = () => {
+    for (const [key, p] of Object.entries(SF.progress.all())) {
+      if (!key.startsWith("movie:")) continue;
+      const done = SF.isFinished(p);
+      for (const poster of document.querySelectorAll(`.poster[data-type="movie"][data-id="${key.slice(6)}"]`)) {
+        const tick = poster.querySelector(".watched-badge");
+        if (done && !tick) poster.append(SF.el("span", { className: "watched-badge", title: t("watched") }, [SF.icon("check")]));
+        else if (!done) tick?.remove();
       }
     }
+  };
+
+  // "Because you watched X": TMDB's recommendations for the 3 titles watched or added to
+  // My list last, without what is being watched already; at most two rows.
+  SF.row = (title, items) =>
+    SF.el("section", { className: "row" }, [
+      SF.el("h2", { className: "row-title" }, [title]),
+      SF.el("div", { className: "row-viewport" }, [
+        SF.el("button", { className: "row-arrow prev", type: "button", "aria-label": t("scroll_back"), hidden: true }, [SF.icon("back")]),
+        SF.el("div", { className: "row-track" }, items.map(SF.poster)),
+        SF.el("button", { className: "row-arrow next", type: "button", "aria-label": t("scroll_forward") }, [SF.icon("next")]),
+      ]),
+    ]);
+  const becauseRows = document.getElementById("because-rows");
+  const becauseCache = new Map(); // "movie:1,tv:2" -> Promise(rows)
+  let becauseShown = "";
+  async function renderBecause() {
+    const watching = Object.entries(SF.progress.all()).filter(([, p]) => p.position > 30 || SF.isFinished(p) || Object.keys(p.episodes || {}).length);
+    const recent = [
+      ...watching.map(([key, p]) => ({ key, title: p.title, when: p.updated || 0 })),
+      ...SF.myList.all().map((i) => ({ key: i.key, title: i.title, when: i.added || 0 })),
+    ].sort((a, b) => b.when - a.when);
+    const sources = [];
+    for (const source of recent) if (source.title && !sources.some((s) => s.key === source.key)) sources.push(source);
+    sources.splice(3);
+    const skip = new Set([...watching.map(([key]) => key), ...sources.map((s) => s.key)]);
+    const shown = `${sources.map((s) => s.key)}|${[...skip]}`;
+    if (shown === becauseShown) return;
+    becauseShown = shown;
+    if (!sources.length) return becauseRows.replaceChildren();
+    const keys = sources.map((s) => s.key).join(",");
+    if (!becauseCache.has(keys)) {
+      becauseCache.set(keys, SF.api(`/api/because?keys=${keys}`).then((d) => d.rows));
+      becauseCache.get(keys).catch(() => becauseCache.delete(keys));
+    }
+    let rows;
+    try {
+      rows = await becauseCache.get(keys);
+    } catch {
+      becauseShown = "";
+      return;
+    }
+    if (becauseShown !== shown) return; // a newer state is being drawn
+    const sections = [];
+    for (const row of rows) {
+      const items = row.items.filter((i) => !skip.has(`${i.type}:${i.id}`)).slice(0, 18);
+      if (items.length < 4) continue;
+      items.forEach((i) => skip.add(`${i.type}:${i.id}`)); // no title in both rows
+      const source = sources.find((s) => s.key === row.key);
+      sections.push(SF.row(t("because_you_watched", { title: source.title }), items));
+      if (sections.length === 2) break;
+    }
+    becauseRows.replaceChildren(...sections);
+    sections.forEach((section) => SF.initRow(section.querySelector(".row-viewport")));
+    applyNewBadges();
   }
 
   function renderHome() {
-    if (continueRow) renderContinue();
     if (listRow) renderList();
+    if (continueRow) renderContinue();
+    if (becauseRows) renderBecause();
     markNewEpisodes();
+    SF.markWatchedPosters();
   }
   renderHome();
   document.addEventListener("sf:shared", renderHome);

@@ -151,14 +151,35 @@ class TMDBClient:
 
     # -- details ----------------------------------------------------------
 
+    def show_summary(self, tmdb_id: int) -> dict[str, Any]:
+        """A show's seasons and last/next episode to air (English, cached 6 h)."""
+        return self._get(f"/tv/{tmdb_id}", ttl=6 * 3600, language="en-US")
+
+    def season_summary(self, tmdb_id: int, season_number: int) -> dict[str, Any]:
+        """A season's episodes with their air dates (English, cached 6 h)."""
+        return self._get(
+            f"/tv/{tmdb_id}/season/{season_number}", ttl=6 * 3600, language="en-US"
+        )
+
+    def recommendations(
+        self, media_type: str, tmdb_id: int, language: str | None = None
+    ) -> list[dict[str, Any]]:
+        """TMDB's recommendations for a title (cached 6 h).
+
+        Pass `language` from worker threads, which have no request to read it from.
+        """
+        data = self._get(
+            f"/{media_type}/{tmdb_id}/recommendations", ttl=6 * 3600, language=language
+        )
+        return data.get("results") or []
+
+    def collection(self, collection_id: int) -> dict[str, Any]:
+        """A film series ("Dune Collection") with its parts (cached a day)."""
+        return self._get(f"/collection/{collection_id}", ttl=86400)
+
     def latest_episode(self, tmdb_id: int) -> dict[str, Any] | None:
         """A show's last aired episode {season, episode, air_date} (specials don't count)."""
-        last = (
-            self._get(f"/tv/{tmdb_id}", ttl=6 * 3600, language="en-US").get(
-                "last_episode_to_air"
-            )
-            or {}
-        )
+        last = self.show_summary(tmdb_id).get("last_episode_to_air") or {}
         if not last.get("season_number") or not last.get("episode_number"):
             return None
         return {

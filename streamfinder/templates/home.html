@@ -34,6 +34,7 @@
         <div class="row-track" id="mylist-track"></div>
       </div>
     </section>
+    <div class="rows-group" id="because-rows"></div>
     {% for r in rows %}
       {{ row(r.title, r['items'], r.key) }}
     {% endfor %}

@@ -200,8 +200,20 @@
   const isResumable = (p) =>
     p && p.duration && p.position > 30 && p.position < p.duration * 0.92;
 
+  // ?s=2&e=1 (an "Up next" card on the home page): the hero offers that episode first.
+  const asked = new URLSearchParams(location.search);
+  let askedEpisode =
+    isTV && Number(asked.get("s")) > 0 && Number(asked.get("e")) > 0
+      ? { season: Number(asked.get("s")), episode: Number(asked.get("e")), runtime: ctx.runtime }
+      : null;
+
   function heroTarget() {
     if (!isTV) return movieTarget();
+    if (askedEpisode) {
+      const target = askedEpisode;
+      askedEpisode = null; // later (after playing it) the stored progress decides again
+      return target;
+    }
     const saved = progress.get(progressKey);
     const firstAired = state.episodes.find((ep) => isAired(ep.air_date));
     const first = firstAired ? episodeTarget(firstAired) : null;
@@ -312,6 +324,25 @@
   });
   renderListButton();
 
+  // Mark as watched (films; episodes have their own toggle in the list)
+  const watchedBtn = $("watched-btn");
+  const watchedInfo = (runtime) => ({ title: ctx.title, backdrop: ctx.backdrop, url: detailUrl, runtime });
+  const renderWatchedButton = () => {
+    const watched = SF.isFinished(progress.get(progressKey));
+    watchedBtn.setAttribute("aria-pressed", String(watched));
+    watchedBtn.title = watched ? t("unmark_watched") : t("mark_watched");
+    $("watched-label").textContent = watched ? t("watched") : t("mark_watched");
+  };
+  if (watchedBtn) {
+    watchedBtn.addEventListener("click", () => {
+      SF.setWatched(progressKey, watchedInfo(ctx.runtime), null, watchedBtn.getAttribute("aria-pressed") !== "true");
+      renderWatchedButton();
+      SF.markWatchedPosters();
+      refreshHero();
+    });
+    renderWatchedButton();
+  }
+
   // ============================================================= episodes (page list + player menu)
 
   // `saved`: the stored progress, read once by callers rendering a whole list.
@@ -336,6 +367,7 @@
         const target = episodeTarget(ep);
         const p = episodeProgress(ep, saved);
         const aired = isAired(ep.air_date);
+        const watched = SF.isFinished(p);
         const more = el(
           "button",
           { className: "episode-more", type: "button", disabled: !aired },
@@ -344,6 +376,23 @@
         more.addEventListener("click", (event) => {
           event.stopPropagation();
           openSheet(target);
+        });
+        const mark = el(
+          "button",
+          {
+            className: "episode-watched",
+            type: "button",
+            disabled: !aired,
+            "aria-pressed": String(watched),
+            title: t(watched ? "unmark_episode_watched" : "mark_episode_watched", { n: ep.episode }),
+          },
+          [icon("check")],
+        );
+        mark.addEventListener("click", (event) => {
+          event.stopPropagation();
+          SF.setWatched(progressKey, watchedInfo(target.runtime), ep, !watched);
+          renderEpisodes();
+          refreshHero();
         });
         const item = el(
           "li",
@@ -366,6 +415,7 @@
               aired
                 ? el("span", { className: "play-badge" }, [icon("play")])
                 : el("span", { className: "release-badge" }, [airLabel(ep)]),
+              watched ? el("span", { className: "watched-badge", title: t("watched") }, [icon("check")]) : null,
               p && p.duration
                 ? el("div", { className: "progress" }, [
                     el("i", {
@@ -400,7 +450,7 @@
                 ? el("p", { className: "episode-overview" }, [ep.overview])
                 : null,
             ]),
-            more,
+            el("div", { className: "episode-actions" }, [mark, more]),
           ],
         );
         if (aired)
