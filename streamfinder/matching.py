@@ -219,6 +219,26 @@ _LEADING_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _SIZE_RE = re.compile(r"([\d.,]+)\s*([KMGT]i?B)", re.IGNORECASE)
+# Sequel / part numbers in titles: "Scream 2", "Rocky II", "Dune: Part One".
+_NUMBER_WORDS = {
+    word: n
+    for words in (
+        "i ii iii iv v vi vii viii ix x",
+        "one two three four five six seven eight nine ten eleven twelve",
+    )
+    for n, word in enumerate(words.split(), 1)
+}
+# Country tags that tell same-name shows apart: "The.Office.US", "Shameless.UK".
+_COUNTRY_TAGS = {
+    "us": "US",
+    "usa": "US",
+    "uk": "GB",
+    "gb": "GB",
+    "au": "AU",
+    "aus": "AU",
+    "nz": "NZ",
+    "ca": "CA",
+}
 
 
 def normalize_title(text: str) -> str:
@@ -274,6 +294,8 @@ class ReleaseInfo:
     is_junk: bool = False  # commentary tracks, AI upscales, fan edits...
     has_czech: bool = False
     has_slovak: bool = False
+    # The year sits in the title part ("Doctor.Who.2005.S01"), not after the episode marker.
+    title_year: bool = False
 
     @property
     def season(self) -> int | None:
@@ -363,6 +385,7 @@ def parse_release(name: str) -> ReleaseInfo:
     if years:
         year_match = years[-1]
         info.year = int(year_match.group(1))
+        info.title_year = year_match.start() < title_end
         title_end = min(title_end, year_match.start())
 
     for token in tokens:
@@ -445,6 +468,37 @@ def _title_variants(title: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(variants))
 
 
+def _title_numbers(title: str) -> set[int]:
+    return {
+        int(w) if w.isdigit() else _NUMBER_WORDS[w]
+        for w in normalize_title(title).split()
+        if w.isdigit() or w in _NUMBER_WORDS
+    }
+
+
+def same_numbers(candidate: str, expected_titles: Iterable[str]) -> bool:
+    """Whether the sequel/part numbers agree with one of the expected titles.
+
+    The fuzzy title match lets "Scream 2" pass for "Scream" (and "Halloween II" for
+    "Halloween") - a different film, often only a year apart.
+    """
+    numbers = _title_numbers(candidate)
+    return any(_title_numbers(t) == numbers for t in expected_titles)
+
+
+def country_tag(candidate: str, expected_titles: Iterable[str]) -> str | None:
+    """Country a show's release is tagged with ("The Office UK" -> "GB"), else None.
+
+    A word that belongs to the show's own title ("This Is Us") is not a tag.
+    """
+    words = normalize_title(candidate).split()
+    if len(words) < 2 or words[-1] not in _COUNTRY_TAGS:
+        return None
+    if any(normalize_title(t).split()[-1:] == words[-1:] for t in expected_titles):
+        return None
+    return _COUNTRY_TAGS[words[-1]]
+
+
 def parse_size(value) -> int:
     """Parse '1.4 GB' / 1503238553 into bytes."""
     if value is None:
@@ -490,6 +544,10 @@ class MatchTarget:
     episode: int | None = None
     free_text: bool = False  # manual query: don't gate on title/episode
     preferred_resolution: int | None = None  # None = automatic (balanced 1080p)
+    # TMDB knows another movie/show of the same title (remake, US/UK version):
+    # a release name then needs the right year (or IMDb id) to count.
+    ambiguous: bool = False
+    countries: list[str] = field(default_factory=list)  # a show's origin: US, GB...
 
 
 # Resolution bonus per user preference ("other" = known but lower resolution).
@@ -516,21 +574,30 @@ def score_torrent(
     size_bytes: int,
     target: MatchTarget,
     id_match: bool = False,
+    id_mismatch: bool = False,
 ) -> float | None:
     """Score a torrent for the target; None means 'wrong content, drop it'.
 
     `id_match` marks results a provider found by exact IMDb id, so naming
     differences ("Dune" vs "Dune: Part One") must not filter them out.
+    `id_mismatch` marks results the index tagged with another IMDb id: a remake
+    or a namesake ("Dune" 1984 when the 2021 film is wanted).
     """
     if info.is_sample:
         return None
-    score = 0.0
+    # Uploaders pick the IMDb tag by hand and sometimes take the original film's:
+    # only an exact year in the name outweighs it ("Halloween.2018" tagged as 1978).
+    if id_mismatch and not (target.year and info.year == target.year):
+        return None
+    score = -15.0 if id_mismatch else 0.0
     pack = pack_kind(info)
 
     if not target.free_text:
         similarity = 1.0 if id_match else title_similarity(info.title, target.titles)
         if similarity < 0.8:
             return None
+        if not id_match and not same_numbers(info.title, target.titles):
+            return None  # a sequel or prequel of the title
         score += (similarity - 0.8) * 50  # up to +10 for exact title
 
         if target.media_type == "movie":
@@ -541,16 +608,26 @@ def score_torrent(
                 if diff > 1:
                     return None
                 score += 10 if diff == 0 else 3
+            elif target.year and target.ambiguous and not id_match:
+                return None  # "Dune 1080p": the 1984 or the 2021 one?
         else:
-            if (
-                target.year
-                and info.year
-                and abs(target.year - info.year) > 1
-                and not info.seasons
-            ):
+            year_off = target.year and info.year and abs(target.year - info.year) > 1
+            if year_off and not info.seasons:
                 return (
                     None  # a year without season markers is probably a same-name movie
                 )
+            if year_off and info.title_year:
+                # "Doctor.Who.2005.S01" when the 1963 show is wanted
+                if target.ambiguous and not id_match:
+                    return None
+                score -= 15
+            elif target.year and info.year and info.title_year:
+                score += 5
+            tag = country_tag(info.title, target.titles)
+            if tag and target.countries and not id_match:
+                if tag not in target.countries:
+                    return None  # "The Office UK" when the US show is wanted
+                score += 10  # also makes up for the tag lowering the title similarity
             if target.season is not None and target.episode is not None:
                 if info.episodes:
                     if (

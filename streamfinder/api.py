@@ -160,14 +160,22 @@ def torrents():
         titles = match_titles(data)
         title = data.get("english_title") or titles[0]
         local = [data.get("czech_title")]
+        original = data.get("original_title") or data.get("original_name")
         if data.get("original_language") in ("cs", "sk"):
-            local.append(data.get("original_title") or data.get("original_name"))
+            local.append(original)
         query = SearchQuery(
             title=title,
             titles=titles,
             year=year_of(data),
             imdb_id=data.get("imdb_id"),
             local_titles=_search_titles(local, title),
+            # Remakes and same-name shows need the year / IMDb id to match.
+            ambiguous=services().tmdb.has_namesake(
+                media_type, tmdb_id, [title, original]
+            ),
+            countries=list(data.get("origin_country") or [])
+            if media_type == "tv"
+            else [],
             **common,
         )
     else:

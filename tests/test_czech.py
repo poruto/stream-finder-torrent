@@ -119,3 +119,29 @@ def test_private_trackers_only_for_sktorrent_results():
     provider._seen["a" * 40] = None
     assert provider.extra_trackers("A" * 40)[0].endswith("pid=x")
     assert provider.extra_trackers("b" * 40) == []
+
+
+def test_czech_releases_of_a_remake():
+    titles = ["Dune", "Duna"]
+    q = SearchQuery(
+        title="Dune",
+        titles=titles,
+        year=2021,
+        czech=True,
+        local_titles=["Duna"],
+        ambiguous=True,
+    )
+    size = 4 * 1024**3
+
+    def sk(name, flags, info_hash, seeders):
+        name = scene_name(name, flags, 19, titles)
+        return RawTorrent(name, info_hash, size, seeders, 2, "SkTorrent")
+
+    raw = [
+        sk("Duna / Dune (2021)(CZ/EN)[1080p] = CSFD 80%", ["cz", "gb"], "a" * 40, 40),
+        sk("Duna / Dune (1984)(CZ)[1080p] = CSFD 70%", ["cz"], "b" * 40, 90),
+        # No year: could be either film.
+        RawTorrent("Duna CZ dabing 1080p", "c" * 40, size, 60, 2, "TPB"),
+    ]
+    ranked = TorrentSearcher._rank(raw, q)
+    assert [r.raw.info_hash for r in ranked] == ["a" * 40]

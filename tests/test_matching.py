@@ -187,3 +187,127 @@ def test_huge_files_are_never_the_default_pick():
     assert by_hash["a" * 40].oversized and not by_hash["b" * 40].oversized
     assert by_hash["b" * 40].per_episode == 25 * 1024**3 // 10
     assert choose_picks(ranked)["recommended"] != "a" * 40
+
+
+def test_remakes_are_told_apart_by_year():
+    for title, years in [
+        ("Dune", (1984, 2021)),
+        ("The Thing", (1982, 2011)),
+        ("Halloween", (1978, 2007, 2018)),
+    ]:
+        for year in years:
+            target = MatchTarget(titles=[title], year=year, ambiguous=True)
+            for other in years:
+                name = f"{title.replace(' ', '.')}.{other}.1080p.BluRay.x264-GRP"
+                assert (score(name, target) is not None) == (other == year), name
+    target = MatchTarget(titles=["The Thing"], year=1982, ambiguous=True)
+    assert score("The Thing (1982) 720p BrRip x264 - 650MB - YIFY", target)
+
+
+def test_name_without_year_needs_an_unambiguous_title():
+    name = "The.Thing.1080p.BluRay.x264-GRP"
+    remake = MatchTarget(titles=["The Thing"], year=2011, ambiguous=True)
+    assert score(name, remake) is None  # the 1982 or the 2011 one?
+    # Found by IMDb id: the id settles it.
+    assert score_torrent(parse_release(name), 50, 2 * 1024**3, remake, id_match=True)
+    # A title no other film has: still fine, just behind a name with the year.
+    unique = MatchTarget(titles=["Interstellar"], year=2014)
+    assert score("Interstellar.1080p.BluRay.x264-GRP", unique) is not None
+    assert score("Interstellar.2014.1080p.BluRay.x264-GRP", unique) > score(
+        "Interstellar.1080p.BluRay.x264-GRP", unique
+    )
+
+
+def test_sequel_numbers_are_a_different_film():
+    scream = MatchTarget(titles=["Scream"], year=1996)
+    assert score("Scream.2.1997.1080p.BluRay.x264", scream) is None
+    assert score("Scream.1996.1080p.BluRay.x264", scream) is not None
+    sequel = MatchTarget(titles=["Scream 2"], year=1997)
+    assert score("Scream.1996.1080p.BluRay.x264", sequel) is None
+    assert score("Scream.II.1997.1080p.BluRay.x264", sequel) is not None
+    part_one = MatchTarget(titles=["Dune: Part One"], year=2021)
+    assert score("Dune.Part.1.2021.1080p.WEB-DL", part_one) is not None
+    assert score("Dune.Part.Two.2021.1080p.WEB-DL", part_one) is None
+
+
+def test_same_name_shows_by_year_and_country():
+    def show(title, year, countries=()):
+        return MatchTarget(
+            titles=[title],
+            media_type="tv",
+            year=year,
+            season=1,
+            episode=1,
+            ambiguous=True,
+            countries=list(countries),
+        )
+
+    revival = "Doctor.Who.2005.S01E01.720p.BluRay.x264"
+    assert score(revival, show("Doctor Who", 1963)) is None
+    assert score(revival, show("Doctor Who", 2005)) > score(
+        "Doctor.Who.S01E01.720p.BluRay.x264", show("Doctor Who", 2005)
+    )
+    us, uk = show("The Office", 2005, ["US"]), show("The Office", 2001, ["GB"])
+    assert score("The.Office.UK.S01E01.720p.WEB", us) is None
+    assert score("The.Office.US.S01E01.720p.WEB", uk) is None
+    assert score("The.Office.US.S01E01.720p.WEB", us) > score(
+        "The.Office.S01E01.720p.WEB", us
+    )
+    assert score("The.Office.S01E01.720p.WEB", uk) is not None
+
+
+def test_imdb_tag_from_the_index_decides():
+    from streamfinder.torrents.providers import RawTorrent, same_imdb
+    from streamfinder.torrents.search import SearchQuery, TorrentSearcher
+
+    query = SearchQuery(title="Dune", titles=["Dune"], year=2021, imdb_id="tt1160419")
+    size = 2 * 1024**3
+    raw = [
+        # No year in the name and TPB tagged it as the 1984 film.
+        RawTorrent(
+            "Dune.1080p.BluRay.x264", "a" * 40, size, 900, 5, "TPB", imdb="tt0087182"
+        ),
+        # Odd name, right id.
+        RawTorrent(
+            "Dune.Part.One.1080p.WEB-DL", "b" * 40, size, 50, 5, "TPB", imdb="tt1160419"
+        ),
+        RawTorrent("Dune.2021.1080p.BluRay.x264-X", "c" * 40, size, 30, 5, "Knaben"),
+        # The name's exact year outweighs a (hand-picked) wrong tag, with a penalty.
+        RawTorrent(
+            "Dune.2021.1080p.BluRay.x264-Y",
+            "d" * 40,
+            size,
+            30,
+            5,
+            "TPB",
+            imdb="0087182",
+        ),
+    ]
+    found = {r.raw.info_hash: r.score for r in TorrentSearcher._rank(raw, query)}
+    assert set(found) == {"b" * 40, "c" * 40, "d" * 40}
+    assert found["d" * 40] < found["c" * 40]
+    assert same_imdb("0386676", "tt0386676") and same_imdb("", "tt1") is None
+
+
+def test_tmdb_namesakes(monkeypatch):
+    from streamfinder.tmdb import TMDBClient
+
+    def movie(tmdb_id, title, votes):
+        return {
+            "media_type": "movie",
+            "id": tmdb_id,
+            "title": title,
+            "vote_count": votes,
+        }
+
+    results = [
+        movie(438631, "Dune", 12000),
+        movie(841, "Dune", 3000),
+        movie(693134, "Dune: Part Two", 6000),
+        movie(1, "Dune: Part Two", 3),  # obscure namesake: ignored
+        {"media_type": "person", "id": 2, "name": "Dune"},
+    ]
+    client = TMDBClient("key")
+    monkeypatch.setattr(client, "_get", lambda *a, **k: {"results": results})
+    assert client.has_namesake("movie", 438631, ["Dune"])
+    assert not client.has_namesake("movie", 693134, ["Dune: Part Two"])

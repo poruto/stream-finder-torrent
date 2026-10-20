@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from . import config
+from .matching import normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,38 @@ class TMDBClient:
         external = data.get("external_ids") or {}
         data["imdb_id"] = data.get("imdb_id") or external.get("imdb_id")
         return data
+
+    def has_namesake(self, media_type: str, tmdb_id: int, titles: list[str]) -> bool:
+        """Whether another known movie/show has the same title (remakes, US/UK versions).
+
+        Torrent names of such titles need a year or an IMDb id to tell them apart.
+        """
+        wanted = {normalize_title(t) for t in titles if t} - {""}
+        if not wanted:
+            return False
+        try:
+            data = self._get(
+                "/search/multi", ttl=86400, language="en-US", query=titles[0]
+            )
+        except TMDBError as e:
+            logger.info("%s", e)
+            return False
+        for item in data.get("results") or []:
+            kind = item.get("media_type")
+            if kind not in ("movie", "tv") or (kind, item.get("id")) == (
+                media_type,
+                tmdb_id,
+            ):
+                continue  # people, or the title itself
+            if (item.get("vote_count") or 0) < 25:
+                continue  # obscure shorts and stubs have no torrents to confuse us
+            names = (
+                item.get("title") or item.get("name"),
+                item.get("original_title") or item.get("original_name"),
+            )
+            if wanted & {normalize_title(n) for n in names if n}:
+                return True
+        return False
 
     def find_imdb(self, imdb_id: str) -> list[dict[str, Any]]:
         """Movies/shows for an IMDb id ('tt0111161')."""

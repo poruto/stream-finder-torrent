@@ -34,6 +34,7 @@ from .providers import (
     RawTorrent,
     TorrentsCSVProvider,
     YTSProvider,
+    same_imdb,
 )
 from .sktorrent import SkTorrentProvider
 
@@ -125,6 +126,9 @@ class SearchQuery:
     # and rank dubbed / subtitled Czech releases higher.
     czech: bool = False
     local_titles: list[str] = field(default_factory=list)
+    # Another movie/show has the same title (see MatchTarget), a show's origin countries.
+    ambiguous: bool = False
+    countries: list[str] = field(default_factory=list)
 
     def episodes_in(self, info: ReleaseInfo) -> int | None:
         """How many episodes a torrent contains (1 for a single movie/episode)."""
@@ -428,6 +432,8 @@ class TorrentSearcher:
             episode=query.episode,
             free_text=query.free_text,
             preferred_resolution=query.quality,
+            ambiguous=query.ambiguous,
+            countries=query.countries,
         )
         merged: dict[str, tuple[RawTorrent, list[str]]] = {}
         for item in raw:
@@ -437,6 +443,7 @@ class TorrentSearcher:
                 existing.leechers = max(existing.leechers, item.leechers)
                 existing.id_match = existing.id_match or item.id_match
                 existing.magnet = existing.magnet or item.magnet
+                existing.imdb = existing.imdb or item.imdb
                 if item.provider not in providers:
                     providers.append(item.provider)
                 # YTS and SkTorrent names are rebuilt from structured data: better for parsing.
@@ -448,8 +455,15 @@ class TorrentSearcher:
         ranked = []
         for item, providers in merged.values():
             info = parse_release(item.name)
+            # An IMDb tag from the index (YTS, EZTV, TPB) confirms or contradicts the name.
+            same = None if query.free_text else same_imdb(item.imdb, query.imdb_id)
             score = score_torrent(
-                info, item.seeders, item.size, target, id_match=item.id_match
+                info,
+                item.seeders,
+                item.size,
+                target,
+                id_match=item.id_match or bool(same),
+                id_mismatch=same is False,
             )
             if score is None:
                 continue

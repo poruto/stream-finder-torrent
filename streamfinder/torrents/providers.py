@@ -2,7 +2,7 @@
 
 * YTS          movies, looked up by IMDb id (exact); browser-friendly MP4/AAC encodes
 * EZTV         TV episodes and packs, looked up by IMDb id
-* APIBay       The Pirate Bay JSON API
+* APIBay       The Pirate Bay JSON API; many uploads are tagged with an IMDb id
 * Knaben       meta-search over 1337x, TPB, RARBG archive, Nyaa and others
 * Torrents-CSV DHT-crawled index with live seeder counts
 """
@@ -39,6 +39,15 @@ class RawTorrent:
     magnet: str = ""
     id_match: bool = False  # found by exact IMDb id
     title: str = ""  # name to show when `name` was rewritten for the parser
+    imdb: str = ""  # IMDb id the index tagged it with ('tt1234567' / '1234567')
+
+
+def same_imdb(a: str | None, b: str | None) -> bool | None:
+    """Whether two IMDb ids are the same title; None when either is unknown."""
+    a, b = (str(x or "").lower().removeprefix("tt") for x in (a, b))
+    if not a.isdigit() or not b.isdigit():
+        return None
+    return int(a) == int(b)
 
 
 class Provider:
@@ -148,6 +157,7 @@ class YTSProvider(Provider):
                         leechers=int(torrent.get("peers") or 0),
                         provider=self.name,
                         id_match=by_id,
+                        imdb=movie.get("imdb_code") or "",
                     )
                 )
         return results
@@ -206,6 +216,7 @@ class EZTVProvider(Provider):
                     leechers=int(item.get("peers") or 0),
                     provider=self.name,
                     magnet=item.get("magnet_url", ""),
+                    imdb=item.get("imdb_id") or "",
                 )
             )
         return results
@@ -232,6 +243,7 @@ class APIBayProvider(Provider):
                         seeders=int(item.get("seeders") or 0),
                         leechers=int(item.get("leechers") or 0),
                         provider=self.name,
+                        imdb=item.get("imdb") or "",
                     )
                 )
             return results
