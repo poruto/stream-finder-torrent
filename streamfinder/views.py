@@ -17,7 +17,7 @@ from flask import (
 )
 
 from . import auth, config
-from .i18n import COOKIE, LANGUAGES, plural, t
+from .i18n import COOKIE, LANGUAGES, current_language, plural, t
 from .matching import normalize_title
 from .services import services
 from .subtitles import LANGUAGE_NAMES
@@ -123,6 +123,22 @@ def is_released(data: dict[str, Any]) -> bool:
     return data.get("status") in ("Released", "Returning Series", "Ended", "Canceled")
 
 
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def coming_label(data: dict[str, Any]) -> str | None:
+    """"Out 18 Dec 2026" / "Vyjde 18. 12. 2026" for a title that isn't out yet."""
+    date = data.get("release_date") or data.get("first_air_date") or ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or is_released(data):
+        return None
+    year, month, day = int(date[:4]), int(date[5:7]), int(date[8:])
+    if current_language() == "cs":
+        when = f"{day}. {month}. {year}"
+    else:
+        when = f"{day} {_MONTHS[month - 1]} {year}"
+    return t("coming_on", date=when)
+
+
 # Widths offered for the big hero backdrops; "original" is at least Full HD on TMDB.
 _BACKDROP_WIDTHS = (("w780", 780), ("w1280", 1280), ("original", 1920))
 
@@ -148,6 +164,7 @@ def card(
         "year": year_of(result),
         "rating": round(result.get("vote_average") or 0, 1),
         "imdb": None,
+        "coming": coming_label(result),
         "poster": image_url(result.get("poster_path"), "w342"),
         "backdrop": image_url(result.get("backdrop_path"), "w780"),
         "url": detail_url(media_type, result["id"]),

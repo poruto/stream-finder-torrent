@@ -784,6 +784,25 @@ select option:checked {
   transform: scale(1.04);
 }
 
+/* "Out 18 Dec 2026" across the bottom of the poster image of a title not released yet */
+.poster:has(.coming-badge) img {
+  filter: saturate(0.55) brightness(0.8);
+}
+.coming-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* "New episode" on a show's poster or continue-watching card */
 .new-badge {
   position: absolute;

@@ -577,11 +577,12 @@
             `IMDb ${item.imdb}`,
           ])
         : null,
+      item.coming ? SF.el("span", { className: "coming-badge" }, [item.coming]) : null,
       SF.el("span", { className: "poster-meta" }, [
         SF.el("span", { className: "poster-title" }, [item.title]),
         SF.el("span", { className: "poster-sub" }, [
           item.year ? SF.el("span", {}, [String(item.year)]) : null,
-          item.rating
+          item.rating && !item.coming
             ? SF.el("span", { className: "rating" }, [
                 SF.icon("star"),
                 String(item.rating),
