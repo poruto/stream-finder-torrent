@@ -287,11 +287,6 @@ def test_release_group(name, group):
     assert parse_release(name).group == group
 
 
-@pytest.mark.xfail(
-    reason="BUG: a name ending in 'WEB-DL' gets the release group 'dl', so two "
-    "unrelated group-less WEB-DL releases look like the same group to subtitle matching",
-    strict=True,
-)
 def test_web_dl_suffix_is_not_a_release_group():
     from streamfinder.matching import release_match_score
 
@@ -438,22 +433,12 @@ def test_slovak_only_release_is_slovak():
     assert 0 < czech_bonus(info) < czech_bonus(parse_release("Movie.2019.CZ.1080p"))
 
 
-@pytest.mark.xfail(
-    reason="BUG: 'dabing' counts as a Czech token, so a Slovak dub is labelled CZ "
-    "and gets the full Czech-dub bonus (22 instead of 14)",
-    strict=True,
-)
 def test_slovak_dub_is_not_labelled_czech():
     info = parse_release("Film.2019.SK.dabing.720p")
     assert info.has_slovak and not info.has_czech
     assert czech_bonus(info) == czech_bonus(parse_release("Film.2019.SK.720p"))
 
 
-@pytest.mark.xfail(
-    reason="BUG: 'SKtit' (Slovak subtitles) is listed as a subtitle token in "
-    "torrents/search.py but not as a Slovak token in matching.py, so it is never detected",
-    strict=True,
-)
 def test_slovak_subtitles_tag_is_recognised():
     assert czech_kind(parse_release("Movie.2019.SKtit.1080p")) == "subs"
 

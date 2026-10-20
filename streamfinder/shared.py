@@ -48,18 +48,23 @@ def merge(stored: dict, incoming: dict, now_ms: float | None = None) -> dict:
     """`incoming` (one browser's copy) merged into `stored`; the newer entry wins."""
     now_ms = time.time() * 1000 if now_ms is None else now_ms
     result = {key: dict(stored.get(key) or {}) for key in _empty()}
+    # A broken or old client may send anything: the wrong shapes are ignored, not a 500.
+    incoming = incoming if isinstance(incoming, dict) else {}
+    part = lambda name, kind: (
+        incoming.get(name) if isinstance(incoming.get(name), kind) else kind()
+    )  # noqa: E731
 
-    for key, entry in (incoming.get("progress") or {}).items():
+    for key, entry in part("progress", dict).items():
         if isinstance(entry, dict) and _time(entry, "updated") > _time(
             result["progress"].get(key), "updated"
         ):
             result["progress"][key] = entry
 
-    for item in incoming.get("list") or []:
+    for item in part("list", list):
         key = isinstance(item, dict) and item.get("key")
         if key and _time(item, "added") > _time(result["list"].get(key), "added"):
             result["list"][key] = item
-    for key, when in (incoming.get("listRemoved") or {}).items():
+    for key, when in part("listRemoved", dict).items():
         if isinstance(when, (int, float)) and when > result["listRemoved"].get(key, 0):
             result["listRemoved"][key] = when
     # An entry added after its removal is back; one removed after it was added is gone.

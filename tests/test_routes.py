@@ -371,16 +371,12 @@ def test_language_switch_is_no_open_redirect(client, target):
 
 def test_language_switch_backslash_stays_on_this_site(client):
     response = client.get("/lang/en", query_string={"next": "/\\evil.example"})
-    assert response.headers["Location"] == "/%5Cevil.example"  # a path here, escaped
+    assert response.headers["Location"] == "/"  # browsers treat /\ like //
 
 
-@pytest.mark.xfail(
-    reason="BUG: views.set_language checks only the netloc; 'https:evil.example' has "
-    "none, Werkzeug sends 'Location: https:///evil.example' and the browser opens "
-    "https://evil.example - an open redirect",
-    strict=True,
+@pytest.mark.parametrize(
+    "target", ["https:evil.example", "http:/evil.example", "javascript:alert(1)"]
 )
-@pytest.mark.parametrize("target", ["https:evil.example", "http:/evil.example"])
 def test_language_switch_rejects_scheme_only_redirects(client, target):
     response = client.get("/lang/en", query_string={"next": target})
     assert response.headers["Location"] == "/"
@@ -654,11 +650,6 @@ def test_shared_list_is_newest_first_and_survives_garbage(client):
     assert response.status_code == 200 and len(response.get_json()["list"]) == 2
 
 
-@pytest.mark.xfail(
-    reason="BUG: shared.merge assumes a JSON object with dict 'progress'; a body like "
-    '[] or {"progress": []} from a broken client is a 500 instead of being ignored',
-    strict=True,
-)
 @pytest.mark.parametrize("body", [[1, 2], {"progress": ["x"]}])
 def test_shared_state_ignores_malformed_bodies(client, body):
     assert client.post("/api/shared", json=body).status_code == 200

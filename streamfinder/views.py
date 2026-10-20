@@ -290,8 +290,11 @@ def set_language(code: str):
         abort(404)
     target = request.args.get("next") or request.referrer or url_for("web.home")
     parsed = urlparse(target)
-    # Only redirect back into this app (no open redirect via ?next=//evil.example).
-    if parsed.netloc not in ("", request.host) or target.startswith("//"):
+    if parsed.scheme in ("http", "https") and parsed.netloc == request.host:
+        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")  # the referrer
+    # Only a path inside this app: no open redirect via //evil.example, /\evil.example
+    # or a scheme without a host ("https:evil.example", which browsers complete).
+    if not target.startswith("/") or target.startswith(("//", "/\\")):
         target = url_for("web.home")
     response = make_response(redirect(target))
     response.set_cookie(COOKIE, code, max_age=365 * 86400, samesite="Lax")

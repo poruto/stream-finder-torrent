@@ -124,7 +124,9 @@ _CZ_TOKENS = {
     "cztitulky",
     "titulky",
 }
-_SK_TOKENS = {"sk", "slo", "slk", "slovak", "slovensky"}
+_SK_TOKENS = {"sk", "slo", "slk", "slovak", "slovensky", "sktit", "sktitulky"}
+# Words both languages use: Czech only when nothing says Slovak ("SK dabing").
+_CZ_SHARED_TOKENS = {"dabing", "titulky"}
 _EN_TOKENS = {"en", "eng", "english"}
 
 # Words that end the title part of a release name.
@@ -429,14 +431,24 @@ def parse_release(name: str) -> ReleaseInfo:
     info.is_complete = bool(info.tokens & {"complete", "collection"})
     info.is_junk = bool(info.tokens & _JUNK_TOKENS) or bool(_JUNK_RE.search(lower))
     info.editions = info.tokens & _EDITIONS
-    info.has_czech = bool(info.tokens & _CZ_TOKENS)
     info.has_slovak = bool(info.tokens & _SK_TOKENS)
+    info.has_czech = bool(info.tokens & (_CZ_TOKENS - _CZ_SHARED_TOKENS)) or (
+        bool(info.tokens & _CZ_SHARED_TOKENS) and not info.has_slovak
+    )
     service = info.tokens & _STREAMING_SERVICES
     if service and info.source in ("WEB-DL", "WEBRip", "WEB"):
         info.service = sorted(service)[0]
 
     group_match = _GROUP_RE.search(base)
-    if group_match and group_match.group(1).lower() not in _STOP_TOKENS:
+    # "...WEB-DL" ends in a source, not a release group.
+    web_source = group_match and re.search(
+        r"web-(dl|rip)\s*$", base[: group_match.end(1)], re.I
+    )
+    if (
+        group_match
+        and not web_source
+        and group_match.group(1).lower() not in _STOP_TOKENS
+    ):
         info.group = group_match.group(1).lower()
 
     # Title is everything before the first structural marker.
@@ -615,7 +627,11 @@ def score_torrent(
         # A sequel or prequel of the title - unless the year is exactly the film's own
         # ("Alien.3.1992" for "Alien³", "Scream.5.2022" for the 2022 "Scream").
         exact_year = bool(target.year and info.year == target.year)
-        if not id_match and not exact_year and not same_numbers(info.title, target.titles):
+        if (
+            not id_match
+            and not exact_year
+            and not same_numbers(info.title, target.titles)
+        ):
             return None
         score += (similarity - 0.8) * 50  # up to +10 for exact title
 

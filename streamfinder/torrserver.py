@@ -116,6 +116,21 @@ class TorrentFile:
         }
 
 
+# A lone number in a pack's file name ("Show - 02.mkv", "02. Pilot.mkv"); never a
+# resolution or codec number.
+_BARE_NUMBER_RE = re.compile(
+    r"(?<![\w])(?:e|ep|episode)?[\s._]*(\d{1,3})(?![\w])", re.I
+)
+_NOT_EPISODES = {264, 265, 480, 576, 720}
+
+
+def _bare_episode(name: str) -> list[int]:
+    stem = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", name)
+    numbers = [int(n) for n in _BARE_NUMBER_RE.findall(stem)]
+    numbers = [n for n in numbers if 0 < n < 500 and n not in _NOT_EPISODES]
+    return numbers if len(numbers) == 1 else []
+
+
 def _episode_of(file: TorrentFile):
     """(season, episodes) for a file, using parent folders when the name lacks the season."""
     info = parse_release(file.name)
@@ -126,7 +141,10 @@ def _episode_of(file: TorrentFile):
             if folder.season is not None:
                 season = folder.season
                 break
-    return season, info.episodes
+    episodes = info.episodes
+    if not episodes and season is not None and info.season is None:
+        episodes = _bare_episode(file.name)  # numbered files in a season folder
+    return season, episodes
 
 
 def video_files(files: list[TorrentFile]) -> list[TorrentFile]:

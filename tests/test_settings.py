@@ -83,25 +83,16 @@ def test_saved_values_read_back_unchanged(settings, value):
     assert dotenv_values(settings)["SF_TEST_A"] == value
 
 
-@pytest.mark.xfail(
-    reason='BUG: config._quote drops single quotes, so a password like "it\'s" is '
-    "saved as 'its' and the login fails after the next restart",
-    strict=True,
-)
 def test_apostrophe_in_a_password_survives_a_restart(settings):
     config.save_settings({"SF_TEST_A": "it's-secret"})
     assert dotenv_values(settings)["SF_TEST_A"] == "it's-secret"
 
 
-@pytest.mark.xfail(
-    reason="BUG: python-dotenv still expands ${VAR} inside the single quotes "
-    "config._quote uses, so a password containing '${...}' is changed on reload",
-    strict=True,
-)
 def test_dollar_brace_in_a_password_survives_a_restart(settings, monkeypatch):
     monkeypatch.setenv("SF_TEST_B", "expanded")
     config.save_settings({"SF_TEST_A": "pa${SF_TEST_B}ss"})
-    assert dotenv_values(settings)["SF_TEST_A"] == "pa${SF_TEST_B}ss"
+    # Read as the app reads it (config.py: no ${VAR} expansion).
+    assert dotenv_values(settings, interpolate=False)["SF_TEST_A"] == "pa${SF_TEST_B}ss"
 
 
 @pytest.mark.parametrize(

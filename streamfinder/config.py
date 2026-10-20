@@ -8,11 +8,12 @@ from dotenv import load_dotenv
 
 # Project root (one level above the package): holds .env and the cache directory.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+# No ${VAR} expansion: passwords and keys are taken exactly as written.
+load_dotenv(os.path.join(BASE_DIR, ".env"), interpolate=False)
 # API keys entered on the Settings page are stored here (Docker: a file on the data volume).
 SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, ".env"))
 if os.path.abspath(SETTINGS_FILE) != os.path.abspath(os.path.join(BASE_DIR, ".env")):
-    load_dotenv(SETTINGS_FILE, override=True)
+    load_dotenv(SETTINGS_FILE, override=True, interpolate=False)
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +132,13 @@ EDITABLE_KEYS = (
 
 
 def _quote(value: str) -> str:
-    """Single-quote values with characters python-dotenv would interpret ($ in password hashes)."""
-    return (
-        value
-        if re.fullmatch(r"[\w.@:/+-]*", value)
-        else "'" + value.replace("'", "") + "'"
-    )
+    """`value` written so that python-dotenv reads it back unchanged: plain, in single
+    quotes ($ in password hashes, spaces, #) or, with a ' inside, in escaped double quotes."""
+    if re.fullmatch(r"[\w.@:/+-]*", value):
+        return value
+    if "'" not in value:
+        return f"'{value}'"
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def save_settings(changes: dict[str, str]) -> None:

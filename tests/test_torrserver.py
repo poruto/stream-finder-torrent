@@ -117,16 +117,21 @@ def test_missing_episode_falls_back_to_the_biggest_file():
     assert select_video_file([]) is None
 
 
-@pytest.mark.xfail(
-    reason="BUG: pack files named only by number ('Season 1/Show - 02.mkv') carry no "
-    "episode marker, so every episode of such a pack plays the first/biggest file",
-    strict=True,
-)
 def test_numbered_files_in_a_season_folder():
     files = [
         TorrentFile(i, f"Show/Season 1/Show - {e:02d}.mkv", 5 * 10**8)
         for i, e in enumerate((1, 2, 3))
     ]
+    assert select_video_file(files, season=1, episode=2).index == 1
+    assert select_video_file(files, season=1, episode=3).index == 2
+
+
+def test_numbered_names_with_titles_and_resolutions():
+    files = [
+        TorrentFile(0, "Show S01/01. Pilot 720p.mkv", 5 * 10**8),
+        TorrentFile(1, "Show S01/02. The Return 720p.mkv", 6 * 10**8),
+    ]
+    assert select_video_file(files, season=1, episode=1).index == 0
     assert select_video_file(files, season=1, episode=2).index == 1
 
 
