@@ -9,3 +9,4 @@ torr/config.db
 torr/viewed.json
 .playwright-mcp/
 .ruff_cache/
+bin/

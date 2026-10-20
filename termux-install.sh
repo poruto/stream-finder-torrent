@@ -11,18 +11,22 @@ DIR="$HOME/stream-finder-torrent"
 TS_TAG="${TORRSERVER_TAG:-MatriX.147}"
 
 echo "==> Installing packages"
-pkg update -y
-pkg install -y python git curl ffmpeg
+# --force-confnew: never stop and ask about changed config files (stdin is the curl pipe).
+APT_OPTS=(-y -o Dpkg::Options::=--force-confnew)
+pkg update "${APT_OPTS[@]}"
+pkg install "${APT_OPTS[@]}" python git curl ffmpeg   # ffmpeg includes ffprobe
 
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" pull --ff-only
+  # fetch + reset (not pull): works for the shallow clone even after a force-push
+  git -C "$DIR" fetch --depth 1 origin master
+  git -C "$DIR" reset --hard origin/master
 else
   git clone --depth 1 "$REPO_URL" "$DIR"
 fi
 cd "$DIR"
 
 echo "==> Installing Python dependencies"
-pip install --upgrade pip >/dev/null
+# No "pip install --upgrade pip": Termux manages pip itself and refuses that.
 pip install -r requirements.txt
 
 echo "==> Downloading TorrServer $TS_TAG"
@@ -107,7 +111,8 @@ case "${1:-start}" in
   restart) stop; start ;;
   status) status ;;
   update)
-    git -C "$DIR" pull --ff-only && pip install -r "$DIR/requirements.txt" && stop && start ;;
+    git -C "$DIR" fetch --depth 1 origin master && git -C "$DIR" reset --hard origin/master \
+      && pip install -r "$DIR/requirements.txt" && stop && start ;;
   logs) tail -n 50 -f "$RUN/app.log" "$RUN/torrserver.log" ;;
   *) echo "usage: streamfinder start|stop|restart|status|update|logs"; exit 1 ;;
 esac
