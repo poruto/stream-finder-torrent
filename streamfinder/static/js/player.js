@@ -1541,6 +1541,7 @@
 
   function clearTracks() {
     state.ai = null;
+    $("ai-status").hidden = true;
     // Hide first: Chrome keeps painting the last cue of a removed track that was showing.
     for (const textTrack of video.textTracks) textTrack.mode = "disabled";
     for (const track of video.querySelectorAll("track")) {
@@ -1796,7 +1797,7 @@
   // Made on the server from the audio, one 30 s window at a time, a window ahead
   // of the playback position (same grid as the server's subtitle sync).
 
-  const AI_WINDOW = 30;
+  const AI_WINDOW = 15; // short windows: the first lines arrive within a few seconds
   const languageName = (code) => {
     try {
       const name = languageNames?.of(code) || code;
@@ -1842,18 +1843,36 @@
     if (state.ai === ai) aiTick();
   }
 
+  // "AI is listening..." over the video while the lines for this moment are still being made.
+  function updateAiStatus() {
+    const ai = state.ai;
+    const box = $("ai-status");
+    const waiting = ai && !ai.stopped && ai.current === state.current && ai.windows.get(Math.floor(pos() / AI_WINDOW)) !== "done";
+    box.hidden = !waiting;
+    if (waiting) $("ai-status-text").textContent = t(ai.slow ? "subs_ai_waiting_torrent" : "subs_ai_listening");
+  }
+
   function aiTick() {
     const ai = state.ai;
+    updateAiStatus();
     if (!ai || ai.stopped || ai.current !== state.current || !state.current) return;
-    const k = Math.floor(pos() / AI_WINDOW);
-    aiFetch(k);
-    aiFetch(k + 1);
+    // One window at a time, the one playing now first (parallel requests only slow
+    // each other down); one that is nearly over is skipped in favour of the next.
+    const now = pos();
+    let k = Math.floor(now / AI_WINDOW);
+    if (now - k * AI_WINDOW > AI_WINDOW - 3 && ai.windows.get(k) !== "done") k += 1;
+    for (const n of [k, k + 1, k + 2]) {
+      if (ai.windows.get(n) !== "done") {
+        aiFetch(n);
+        break;
+      }
+    }
   }
   video.addEventListener("timeupdate", aiTick);
 
   async function aiFetch(n) {
     const ai = state.ai;
-    if (!ai || n < 0 || ai.windows.has(n) || ai.inflight >= 2) return;
+    if (!ai || n < 0 || ai.windows.has(n) || ai.inflight >= 1) return;
     if (dur() && n * AI_WINDOW >= dur()) return;
     const current = ai.current;
     ai.windows.set(n, "loading");
@@ -1876,6 +1895,7 @@
         ai.windows.delete(n);
         if ([429, 503, 504].includes(response.status)) {
           retryIn = (data.retry_after || 10) * 1000;
+          ai.slow = response.status === 504;
           if (!ai.warned) toast(t(response.status === 429 ? "subs_ai_limit" : "subs_ai_slow"));
           ai.warned = true;
         } else if ([401, 501].includes(response.status) || ++ai.failures > 4) {
@@ -1888,6 +1908,7 @@
         return;
       }
       ai.failures = 0;
+      ai.slow = false;
       ai.windows.set(n, "done");
       ai.spoken ||= data.language || ""; // later windows: known language, English route if useful
       const cues = ai.track.track;
@@ -1902,6 +1923,7 @@
       retryIn = 5000;
     } finally {
       ai.inflight -= 1;
+      updateAiStatus();
     }
     if (retryIn) setTimeout(aiTick, retryIn);
     else aiTick();
