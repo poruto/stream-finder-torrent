@@ -1,7 +1,12 @@
-# Builds the Windows setup .exe (GitHub Actions runs this for every version):
+# Builds the portable Windows app (GitHub Actions runs this for every version):
 #   powershell -ExecutionPolicy Bypass -File windows\build-release.ps1
-# Needs Python 3.12 (the bundled one is the same version, for the compiled packages)
-# and Inno Setup 6. Output: dist\StreamFinder-Setup-<version>.exe
+# Needs Python 3.12 (the bundled one is the same version, for the compiled packages).
+# Output: dist\StreamFinder-<version>-windows.zip - unzip anywhere, run StreamFinder.exe:
+#   StreamFinder.exe  launcher (windows\launcher.cs) -> app\windows\control.py tray
+#   python\           embedded Python with the dependencies
+#   app\              the app (VERSION file instead of .git), TorrServer in app\bin;
+#                     settings and cache are created here too
+#   whisper\          whisper.cpp server and the fastest model, for AI subtitles
 param(
   [string]$Version,
   [string]$Commit
@@ -55,6 +60,7 @@ New-Item -ItemType Directory -Force (Join-Path $app 'windows'), (Join-Path $app 
 Copy-Item (Join-Path $Repo 'app.py'), (Join-Path $Repo '.env.example'), (Join-Path $Repo 'requirements.txt') $app
 Copy-Item -Recurse (Join-Path $Repo 'streamfinder') $app
 Get-ChildItem -Recurse -Directory -Filter __pycache__ $app | Remove-Item -Recurse -Force
+# control.py: tray and supervisor; streamfinder.cmd: the command line
 foreach ($file in 'control.py', 'streamfinder.cmd', 'streamfinder.ico') {
   Copy-Item (Join-Path $Repo "windows\$file") (Join-Path $app 'windows')
 }
@@ -78,9 +84,16 @@ Get-ChildItem -Recurse $whisperTmp -Include 'whisper-server.exe', '*.dll' | Copy
 $model = Get-Download 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin' 'ggml-tiny-q5_1.bin'
 Copy-Item $model (Join-Path $Out 'whisper\models')
 
-Write-Host '==> Building the setup'
-$iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
-if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-& $iscc /Q "/DVersion=$Version" "/DSource=$Out" "/O$(Join-Path $Repo 'dist')" (Join-Path $PSScriptRoot 'installer.iss')
-Assert-Ok 'Inno Setup'
-Get-ChildItem (Join-Path $Repo 'dist\*.exe') | ForEach-Object { Write-Host "Built $($_.FullName)" }
+Write-Host '==> Building StreamFinder.exe'
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'  # comes with Windows
+& $csc -nologo -target:winexe "-win32icon:$(Join-Path $PSScriptRoot 'streamfinder.ico')" `
+  -r:System.Windows.Forms.dll "-out:$(Join-Path $Out 'StreamFinder.exe')" (Join-Path $PSScriptRoot 'launcher.cs')
+Assert-Ok 'csc'
+
+Write-Host '==> Packing'
+$dist = Join-Path $Repo 'dist'
+New-Item -ItemType Directory -Force $dist | Out-Null
+$package = Join-Path $dist "StreamFinder-$Version-windows.zip"
+if (Test-Path $package) { Remove-Item $package }
+Compress-Archive -Path $Out -DestinationPath $package -CompressionLevel Optimal  # one StreamFinder\ folder inside
+Write-Host "Built $package ($([math]::Round((Get-Item $package).Length / 1MB)) MB)"

@@ -2,7 +2,7 @@
 # (counted from the commit messages, see streamfinder/version.py) and gets:
 # - the Docker image (amd64, Raspberry Pi arm64 and armv7) that docker-up.sh pulls
 #   instead of building: ghcr.io/poruto/stream-finder-torrent:latest | :<version> | :sha-<commit>
-# - a GitHub release v<version> with the Windows setup .exe (installed copies update from it)
+# - a GitHub release v<version> with the portable Windows app (copies in use update from it)
 name: ci
 
 on:
@@ -82,11 +82,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Inno Setup
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-      - name: Build the setup
+      - name: Build the app
         shell: pwsh
         run: ./windows/build-release.ps1 -Version $env:VERSION -Commit $env:COMMIT
       - name: Release
@@ -94,9 +90,9 @@ jobs:
         run: |
           tag="v$VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/*.exe --clobber
+            gh release upload "$tag" dist/*.zip --clobber
           else
             git log -1 --format=%B > notes.txt
-            gh release create "$tag" dist/*.exe --target "$GITHUB_SHA" \
+            gh release create "$tag" dist/*.zip --target "$GITHUB_SHA" \
               --title "StreamFinder $VERSION" --notes-file notes.txt
           fi

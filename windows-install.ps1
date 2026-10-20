@@ -83,9 +83,10 @@ function Install-StreamFinder {
   $startup = [Environment]::GetFolderPath('Startup')
   $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startup 'StreamFinder.lnk'))
   $shortcut.TargetPath = "$Venv\pythonw.exe"
-  $shortcut.Arguments = "`"$Cli`" run"
+  $shortcut.Arguments = "`"$Cli`" tray --background"
   $shortcut.WorkingDirectory = $Dir
-  $shortcut.Description = 'StreamFinder (TorrServer, app and Whisper in the background)'
+  $shortcut.Description = 'StreamFinder (TorrServer, app and Whisper in the background, tray icon)'
+  $shortcut.IconLocation = Join-Path $Dir 'windows\streamfinder.ico'
   $shortcut.Save()
 
   # The `streamfinder` command in every new terminal.
@@ -113,6 +114,7 @@ function Install-StreamFinder {
   }
 
   & "$Venv\python.exe" $Cli start
+  Start-Process "$Venv\pythonw.exe" -ArgumentList "`"$Cli`" tray --background" -WorkingDirectory $Dir  # tray icon
   Write-Host ''
   Write-Host 'StreamFinder now runs in the background from every logon, restarts if it crashes and updates itself.'
   Write-Host 'Other devices: the Wi-Fi/Ethernet network must be "Private" (Settings > Network & internet).'

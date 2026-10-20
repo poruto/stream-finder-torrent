@@ -24,26 +24,32 @@ Only use it for content you are allowed to watch.
 ## Install
 
 You need one free key, from TMDB (the movie catalogue) - see [API keys](#api-keys).
-The installers ask for it; you can also skip it and enter it later on the web.
+The installers ask for it (the Windows app on its first start, in the browser); you
+can also skip it and enter it later in Settings.
 
 ### Windows 10 / 11
 
-Download **StreamFinder-Setup-x.y.z.exe** from the
-[latest release](https://github.com/poruto/stream-finder-torrent/releases/latest)
-and run it. Everything is inside (Python, TorrServer, Whisper), no admin rights
-needed. Windows may warn about an unknown publisher: _More info → Run anyway_.
+Download **StreamFinder-x.y.z-windows.zip** from the
+[latest release](https://github.com/poruto/stream-finder-torrent/releases/latest),
+unzip it anywhere (Documents, a USB stick - not Program Files) and run
+**StreamFinder.exe**. Nothing to install: Python, TorrServer and Whisper are in the
+folder, and so are your settings. Windows may warn about an unknown app: *More
+info → Run anyway*.
 
-Or, if you prefer a git checkout, in PowerShell:
+The browser opens and StreamFinder sits in the tray (bottom right). Right-click
+the icon for *Start with Windows*, *Check for updates* and *Quit*. It also checks
+for new versions by itself every 30 minutes. When Windows asks whether TorrServer
+and Python may use the network, allow it (private networks) so your TV and phone
+can connect.
+
+Prefer a git checkout? In PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/poruto/stream-finder-torrent/master/windows-install.ps1 | iex
 ```
 
-Either way StreamFinder starts with Windows, runs in the background and updates
-itself. When Windows asks whether TorrServer and Python may use the network,
-allow it (private networks) so your TV and phone can connect. Start menu has
-_StreamFinder_ and _Stop StreamFinder_; in a terminal you can use
-`streamfinder start | stop | restart | status | update | logs`.
+That one starts with Windows, follows `master` and adds the `streamfinder start |
+stop | restart | status | update | logs` command.
 
 ### Raspberry Pi or a Linux server (Docker)
 
@@ -131,7 +137,7 @@ Every push to `master` is a new version, numbered from the commit messages
 (`feat:` → 1.**16**.0, anything else → 1.15.**2**). The number is in the top left
 corner of the app. Installs check for new versions by themselves: the Pi every
 5 minutes, phones and Windows every 30 minutes. Each version also gets a GitHub
-release with the Windows setup and a Docker image
+release with the portable Windows app and a Docker image
 (`ghcr.io/poruto/stream-finder-torrent`).
 
 ## Development
@@ -159,7 +165,7 @@ streamfinder/
   tmdb.py, imdb.py      metadata and ratings
   i18n.py               English and Czech texts
   version.py            version from the commit history
-windows/                Windows service (control.py) and setup (installer.iss)
+windows/                Windows tray app and service (control.py, launcher.cs, build-release.ps1)
 install.sh, update.sh   Docker install on Linux; docker-up.sh starts the containers
 termux-install.sh       Android
 install-whisper.sh      local Whisper on Linux/Termux

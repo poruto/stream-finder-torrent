@@ -2,13 +2,15 @@
 
     streamfinder start | stop | restart | status | update | logs
 
-Two ways to install, the same commands:
+Two ways to get it, the same commands:
+- the portable app from GitHub Releases (windows/build-release.ps1): unzip, run
+  StreamFinder.exe. Python, TorrServer and Whisper are inside, no git; it updates
+  by unpacking the newest release over its folder.
 - windows-install.ps1: a git clone with its own .venv, updated from GitHub master.
-- the setup .exe from GitHub Releases (windows/installer.iss): Python, TorrServer
-  and Whisper bundled, no git; updated by installing the newest release.
-Both start `run` at logon (pythonw, no window): the supervisor restarts whatever
-crashes and checks for a new version every 30 minutes. `install` downloads what is
-missing (TorrServer, Whisper) and asks for missing keys; updates run it again.
+`tray` (StreamFinder.exe) starts `run`, opens the browser and stays in the tray.
+`run` is the supervisor (pythonw, no window): it restarts whatever crashes and
+checks for a new version every 30 minutes. `install` downloads what is missing
+(TorrServer, Whisper) and asks for missing keys; updates run it again.
 Logs: cache/logs/*.log
 """
 
@@ -21,6 +23,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 import zipfile
@@ -36,9 +39,22 @@ CACHE = os.path.join(REPO, "cache")
 LOGS = os.path.join(CACHE, "logs")
 # {"supervisor": pid, "<service>": pid}; the app reads the Whisper pid to restart it
 PID_FILE = os.path.join(CACHE, "streamfinder.pid")
+TRAY_PID_FILE = os.path.join(CACHE, "tray.pid")
+ICON = os.path.join(REPO, "windows", "streamfinder.ico")
+STARTUP_LINK = os.path.join(
+    os.getenv("APPDATA", ""),
+    "Microsoft",
+    "Windows",
+    "Start Menu",
+    "Programs",
+    "Startup",
+    "StreamFinder.lnk",
+)
 FAILED_FILE = os.path.join(CACHE, ".update-failed")
 # A release has no .git: it updates from GitHub Releases instead of master.
 RELEASE = not os.path.isdir(os.path.join(REPO, ".git"))
+ROOT = os.path.dirname(REPO)  # the portable app's folder
+LAUNCHER = os.path.join(ROOT, "StreamFinder.exe")
 RELEASES_API = (
     "https://api.github.com/repos/poruto/stream-finder-torrent/releases/latest"
 )
@@ -250,7 +266,7 @@ def _version_key(version: str) -> tuple[int, ...]:
 
 
 def _new_release() -> str | None:
-    """Download URL of the newest release's setup .exe, when it is newer than this one."""
+    """Download URL of the newest release's portable zip, when it is newer than this one."""
     from streamfinder.version import VERSION
 
     try:
@@ -265,7 +281,7 @@ def _new_release() -> str | None:
         (
             a["browser_download_url"]
             for a in release.get("assets", [])
-            if a["name"].lower().endswith(".exe")
+            if a["name"].lower().endswith("-windows.zip")
         ),
         None,
     )
@@ -273,7 +289,7 @@ def _new_release() -> str | None:
 
 
 def _new_version() -> str | None:
-    """What to update to: the newer release (setup .exe URL) or master commit (clone)."""
+    """What to update to: the newer release (zip URL) or master commit (clone)."""
     if RELEASE:
         return _new_release()
     if _git("fetch", "-q", "origin", "master", timeout=120).returncode:
@@ -288,22 +304,62 @@ def _new_version() -> str | None:
     return remote
 
 
+def _ps(path: str) -> str:
+    return "'" + path.replace("'", "''") + "'"
+
+
 def _install_release(url: str, interactive: bool) -> bool:
-    """Run the new setup .exe; it stops StreamFinder, installs and starts it again."""
-    path = os.path.join(CACHE, "StreamFinder-Setup.exe")
+    """Download the new portable zip; a helper unpacks it over this folder once every
+    StreamFinder process has stopped (running files can't be replaced) and starts it."""
+    archive = os.path.join(CACHE, "StreamFinder-update.zip")
     try:
-        _download(url, path)
+        _download(url, archive)
     except requests.RequestException as e:
         log.error("downloading %s failed: %s", url, e)
         print(f"!! Downloading the new version failed: {e}")
         return False
-    _detach([path, "/SILENT" if interactive else "/VERYSILENT", "/SUPPRESSMSGBOXES"])
+    script = os.path.join(CACHE, "update.ps1")
+    with open(script, "w", encoding="utf-8-sig") as f:
+        f.write(
+            f"""$ErrorActionPreference = 'Stop'
+Start-Sleep -Seconds 3
+# Everything that runs from this folder (tray, supervisor, app, TorrServer, Whisper).
+$root = {_ps(ROOT + os.sep)}
+for ($i = 0; $i -lt 20; $i++) {{
+  $running = Get-Process | Where-Object {{ $_.Path -and $_.Path.StartsWith($root, 'OrdinalIgnoreCase') }}
+  if (-not $running) {{ break }}
+  $running | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 1
+}}
+$unpacked = Join-Path $env:TEMP 'StreamFinder-update'
+if (Test-Path $unpacked) {{ Remove-Item -Recurse -Force $unpacked }}
+Expand-Archive -Force {_ps(archive)} $unpacked
+$new = (Get-ChildItem $unpacked -Directory | Select-Object -First 1).FullName
+# Files a new version no longer has must not linger; settings and cache stay.
+Remove-Item -Recurse -Force {_ps(os.path.join(REPO, "streamfinder"))}, {_ps(os.path.join(ROOT, "python"))} -ErrorAction SilentlyContinue
+Copy-Item -Recurse -Force (Join-Path $new '*') {_ps(ROOT)}
+Remove-Item -Recurse -Force $unpacked, {_ps(archive)}
+Start-Process {_ps(LAUNCHER)} -ArgumentList '--background'
+"""
+        )
+    _detach(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            script,
+        ]
+    )
     return True
 
 
 def _apply_update(target: str, interactive: bool) -> bool:
     """Check out commit `target`, install its dependencies and run its `install` step
-    (a release: run the setup .exe at URL `target`)."""
+    (a release: unpack the zip at URL `target`)."""
     if RELEASE:
         return _install_release(target, interactive)
     steps = [
@@ -367,8 +423,13 @@ def run() -> None:
                     continue  # crashing right away: try again at most every 10 s
                 if proc:
                     log.warning("%s exited with %s, restarting", name, proc.returncode)
-                procs[name] = _spawn(name, command)
                 started[name] = time.time()
+                try:
+                    procs[name] = _spawn(name, command)
+                except OSError as e:  # missing or blocked .exe (antivirus): retry later
+                    log.error("%s could not start: %s", name, e)
+                    procs.pop(name, None)
+                    continue
                 _write_pids(procs)
             if time.time() >= next_update:
                 next_update = time.time() + UPDATE_EVERY
@@ -379,7 +440,7 @@ def run() -> None:
                         _kill_tree(proc.pid)
                     _apply_update(target, interactive=False)
                     os.remove(PID_FILE)
-                    if not RELEASE:  # the setup .exe starts the new version itself
+                    if not RELEASE:  # the update helper starts the new version itself
                         _launch_supervisor()  # the new version's supervisor
                     return
             time.sleep(2)
@@ -600,17 +661,11 @@ def ask_keys() -> bool:
     return bool(changes)
 
 
-def install(*settings: str) -> None:
-    """Also takes KEY=value settings (the setup .exe passes the TMDB key it asked for)."""
-    from streamfinder import config
-
+def install() -> None:
     os.makedirs(LOGS, exist_ok=True)
     os.makedirs(os.path.join(REPO, "data", "torrserver"), exist_ok=True)
     _install_torrserver()
     _create_env()
-    pairs = dict(s.split("=", 1) for s in settings if "=" in s)
-    if pairs := {k: v.strip() for k, v in pairs.items() if v.strip()}:
-        config.save_settings(pairs)
     print(
         "Keys and logins can also be entered later on the web: Settings (login admin / admin)."
     )
@@ -697,17 +752,171 @@ def update() -> None:
     print(f"==> Updating to {target if RELEASE else target[:7]}")
     stop()  # running files can't be replaced
     ok = _apply_update(target, interactive=True)
-    if not RELEASE:  # the setup .exe starts the new version itself
+    if not RELEASE:  # the update helper starts the new version itself
         start()
     if not ok:
         print("!! The update failed - see the output above.")
 
 
 def open_app() -> None:
-    """Start Menu shortcut: start (when stopped) and open the app in the browser."""
+    """Start (when stopped) and open the app in the browser."""
     if not _supervisor():
         start()
     webbrowser.open(f"http://127.0.0.1:{_app_port()}")
+
+
+# --- the tray icon (StreamFinder.exe) ---------------------------------------
+
+TRAY_TEXT = {
+    "en": {
+        "open": "Open StreamFinder",
+        "autostart": "Start with Windows",
+        "update": "Check for updates",
+        "quit": "Quit",
+        "up_to_date": "StreamFinder {version} is up to date.",
+        "updating": "Installing the new version, StreamFinder restarts in a moment.",
+        "update_failed": "The update failed - see cache/logs/supervisor.log.",
+    },
+    "cs": {
+        "open": "Otevřít StreamFinder",
+        "autostart": "Spouštět s Windows",
+        "update": "Zkontrolovat aktualizace",
+        "quit": "Ukončit",
+        "up_to_date": "StreamFinder {version} je aktuální.",
+        "updating": "Instaluji novou verzi, StreamFinder se za chvíli znovu spustí.",
+        "update_failed": "Aktualizace selhala - viz cache/logs/supervisor.log.",
+    },
+}
+
+
+def _tray_text() -> dict[str, str]:
+    # Windows display language: Czech and Slovak get Czech.
+    language = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
+    return TRAY_TEXT["cs" if language in (0x05, 0x1B) else "en"]
+
+
+def _tray_pid() -> int | None:
+    try:
+        with open(TRAY_PID_FILE, encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    image = _image(pid)
+    return pid if image and os.path.basename(image).lower() == "pythonw.exe" else None
+
+
+def _set_autostart(on: bool) -> None:
+    """The Startup-folder shortcut that starts StreamFinder (without the browser) at logon."""
+    if not on:
+        if os.path.exists(STARTUP_LINK):
+            os.remove(STARTUP_LINK)
+        return
+    if RELEASE:
+        target, arguments, folder = LAUNCHER, "--background", ROOT
+    else:
+        target, arguments, folder = (
+            PYTHONW,
+            f'"{os.path.abspath(__file__)}" tray --background',
+            REPO,
+        )
+    script = (
+        f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut({_ps(STARTUP_LINK)}); "
+        f"$s.TargetPath = {_ps(target)}; $s.Arguments = {_ps(arguments)}; "
+        f"$s.WorkingDirectory = {_ps(folder)}; $s.IconLocation = {_ps(ICON)}; $s.Save()"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        creationflags=NO_WINDOW,
+    )
+
+
+def tray(*args: str) -> None:
+    """StreamFinder.exe: start everything, open the browser and stay in the tray."""
+    background = "--background" in args
+    if _tray_pid():  # already running: just open it
+        if not background:
+            open_app()
+        return
+    import pystray
+    from PIL import Image
+
+    from streamfinder.version import VERSION
+
+    os.makedirs(LOGS, exist_ok=True)
+    logging.basicConfig(
+        filename=os.path.join(LOGS, "tray.log"),
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    with open(TRAY_PID_FILE, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    text = _tray_text()
+    try:
+        install()  # first start: .env, Whisper settings; later: nothing to do
+    except Exception:
+        log.exception("install step failed")
+    if not _supervisor():
+        _launch_supervisor()
+
+    def open_when_ready() -> None:
+        port = _app_port()
+        for _ in range(90):
+            if _responds(f"http://127.0.0.1:{port}/api/healthz"):
+                break
+            time.sleep(1)
+        webbrowser.open(f"http://127.0.0.1:{port}")
+
+    def check_update(icon) -> None:
+        target = _new_version()
+        if not target:
+            icon.notify(text["up_to_date"].format(version=VERSION), "StreamFinder")
+            return
+        icon.notify(text["updating"], "StreamFinder")
+        stop()
+        if not _apply_update(target, interactive=False):
+            _launch_supervisor()
+            icon.notify(text["update_failed"], "StreamFinder")
+        elif (
+            not RELEASE
+        ):  # a clone: start the new version (the zip helper does it itself)
+            os.remove(TRAY_PID_FILE)
+            _launch_supervisor()
+            _detach([PYTHONW, os.path.abspath(__file__), "tray", "--background"])
+            icon.stop()
+
+    def quit_app(icon) -> None:
+        stop()
+        icon.stop()
+
+    in_background = lambda job: (
+        lambda icon, item: threading.Thread(  # noqa: E731
+            target=job, args=(icon,), daemon=True
+        ).start()
+    )
+    menu = pystray.Menu(
+        pystray.MenuItem(
+            text["open"], in_background(lambda icon: open_app()), default=True
+        ),
+        pystray.MenuItem(
+            text["autostart"],
+            lambda icon, item: _set_autostart(not os.path.exists(STARTUP_LINK)),
+            checked=lambda item: os.path.exists(STARTUP_LINK),
+        ),
+        pystray.MenuItem(text["update"], in_background(check_update)),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(text["quit"], lambda icon, item: quit_app(icon)),
+    )
+    icon = pystray.Icon(
+        "StreamFinder", Image.open(ICON), f"StreamFinder {VERSION}", menu
+    )
+    if not background:
+        threading.Thread(target=open_when_ready, daemon=True).start()
+    try:
+        icon.run()
+    finally:
+        if _tray_pid() == os.getpid():
+            os.remove(TRAY_PID_FILE)
 
 
 def logs() -> None:
@@ -750,8 +959,9 @@ COMMANDS = {
     "status": status,
     "update": update,
     "logs": logs,
-    "open": open_app,  # Start Menu shortcut
-    "install": install,  # windows-install.ps1, the setup .exe and updates
+    "open": open_app,
+    "tray": tray,  # StreamFinder.exe and the logon shortcut
+    "install": install,  # windows-install.ps1 and updates
     "run": run,  # the supervisor (logon shortcut)
 }
 
