@@ -28,10 +28,15 @@ if [ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 1048576 ]; then
 fi
 
 echo "=== $(date '+%F %T') updating ${deployed:0:7} -> ${remote:0:7}" >> "$LOG"
-if nice -n 10 bash "$REPO/update.sh" >> "$LOG" 2>&1; then
+# Wait for GitHub's ready-made image (up to 45 minutes) rather than building on the Pi.
+status=0
+STREAMFINDER_WAIT_FOR_IMAGE=1 nice -n 10 bash "$REPO/update.sh" >> "$LOG" 2>&1 || status=$?
+if [ "$status" = 0 ]; then
   echo "$remote" > "$STATE/deployed"
   rm -f "$STATE/failed"
   echo "=== $(date '+%F %T') OK" >> "$LOG"
+elif [ "$status" = 75 ]; then
+  echo "=== $(date '+%F %T') waiting for the image" >> "$LOG"
 else
   echo "$remote" > "$STATE/failed"
   echo "=== $(date '+%F %T') FAILED (see above)" >> "$LOG"
