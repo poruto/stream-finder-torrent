@@ -179,6 +179,17 @@ def test_new_stream_of_a_file_replaces_the_old_one(monkeypatch):
     assert t._slots._value == transcode.MAX_SESSIONS and not t._active
 
 
+def test_two_viewers_of_a_file_keep_their_own_streams(monkeypatch):
+    t = Transcoder(ffmpeg="ffmpeg", ffprobe="ffprobe")
+    monkeypatch.setattr(t, "command", lambda *a: [sys.executable, "-c", FAKE_FFMPEG])
+    tv = t.stream("http://x/a", viewer="tv")
+    phone = t.stream("http://x/a", viewer="phone")
+    assert next(tv) == b"x" * 10 and next(phone) == b"x" * 10  # neither was killed
+    tv.close()
+    phone.close()
+    assert t._slots._value == transcode.MAX_SESSIONS and not t._active
+
+
 def test_stream_slot_is_released_without_reading_and_when_busy(monkeypatch):
     t = Transcoder(ffmpeg="ffmpeg", ffprobe="ffprobe")
     monkeypatch.setattr(t, "command", lambda *a: [sys.executable, "-c", FAKE_FFMPEG])

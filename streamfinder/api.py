@@ -326,6 +326,7 @@ def transcode(info_hash: str, index: int):
             track,
             copy_audio=request.args.get("copy") == "1",
             video_codec=video_codec,
+            viewer=request.args.get("sid", "")[:64],  # one conversion per player
         )
     except TranscoderBusy as e:
         return jsonify(success=False, error=str(e)), 503

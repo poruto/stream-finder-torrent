@@ -35,7 +35,7 @@ RW_TIMEOUT = ["-rw_timeout", "60000000"]
 # No console window for every ffmpeg on Windows (when run as a service or by pythonw).
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 PROBE_CACHE = 64  # files whose probe result is kept
-PROBE_RETRY = 60  # seconds before a failed probe is tried again
+PROBE_RETRY = 10  # seconds before a failed probe is tried again (a cold torrent wakes up)
 
 _STREAM_RE = re.compile(
     r"Stream #0:(\d+)(?:\[\w+\])?(?:\((\w+)\))?: (Video|Audio): (\w+)[^\n]*"
@@ -112,7 +112,8 @@ class Transcoder:
         self._probes: LRU = LRU(PROBE_CACHE)
         self._probing = KeyedLocks()
         self._lock = threading.Lock()
-        self._active: dict[str, subprocess.Popen] = {}  # url -> its running conversion
+        # (url, viewer) -> its running conversion
+        self._active: dict[tuple[str, str], subprocess.Popen] = {}
 
     @property
     def available(self) -> bool:
@@ -125,7 +126,7 @@ class Transcoder:
 
         The player asks for it several times at once (probe, keyframe, stream):
         only one ffprobe runs, the others wait for its result. A failure is
-        remembered for a minute, so every seek doesn't wait for another timeout.
+        remembered for a few seconds, so a burst of requests doesn't wait for another timeout.
         """
         with self._probing.hold(url):
             cached = self._probes.get(url)
@@ -379,15 +380,18 @@ class Transcoder:
         audio_track: int = 0,
         copy_audio: bool = False,
         video_codec: str | None = None,
+        viewer: str = "",
     ) -> "Conversion":
         """Start ffmpeg and return its fragmented MP4 output.
 
-        A new stream of a file replaces the one already running for it (the player
-        seeked), so a stalled old ffmpeg never holds a slot. Raises TranscoderBusy
-        when every slot stays taken.
+        A new stream of a file replaces the one already running for the same viewer
+        (the player seeked), so a stalled old ffmpeg never holds a slot; other
+        viewers of the file keep theirs. Raises TranscoderBusy when every slot
+        stays taken.
         """
+        key = (url, viewer)
         with self._lock:
-            previous = self._active.get(url)
+            previous = self._active.get(key)
         if previous is not None:
             previous.kill()  # its Conversion sees the end of output and frees the slot
         if not self._slots.acquire(timeout=SLOT_WAIT):
@@ -404,13 +408,13 @@ class Transcoder:
             self._slots.release()
             raise
         with self._lock:
-            self._active[url] = process
-        return Conversion(self, url, process)
+            self._active[key] = process
+        return Conversion(self, key, process)
 
-    def _finished(self, url: str, process: subprocess.Popen) -> None:
+    def _finished(self, key: tuple[str, str], process: subprocess.Popen) -> None:
         with self._lock:
-            if self._active.get(url) is process:
-                del self._active[url]
+            if self._active.get(key) is process:
+                del self._active[key]
         self._slots.release()
 
 
@@ -421,8 +425,8 @@ class Conversion:
     even when the body was never read, so the slot is always given back.
     """
 
-    def __init__(self, transcoder: Transcoder, url: str, process: subprocess.Popen):
-        self.transcoder, self.url, self.process = transcoder, url, process
+    def __init__(self, transcoder: Transcoder, key: tuple, process: subprocess.Popen):
+        self.transcoder, self.key, self.process = transcoder, key, process
         self._closed = False
 
     def __iter__(self) -> Iterator[bytes]:
@@ -444,4 +448,4 @@ class Conversion:
             self.process.wait()
             self.process.stdout.close()
         finally:
-            self.transcoder._finished(self.url, self.process)
+            self.transcoder._finished(self.key, self.process)
