@@ -2,19 +2,22 @@
 # StreamFinder on an Android phone (Termux), one command:
 #   curl -fsSL https://raw.githubusercontent.com/poruto/stream-finder-torrent/master/termux-install.sh | bash
 #
-# Installs Python, git, ffmpeg (audio conversion), the app and TorrServer, then adds a
-# `streamfinder` command: streamfinder start | stop | status | update | logs
+# Installs Python, git, ffmpeg (audio conversion), the app and TorrServer and runs both
+# as always-on services (termux-services / runit: restarted if they crash, started again
+# after a reboot with Termux:Boot). Control them with:
+#   streamfinder start | stop | restart | status | update | logs
 set -euo pipefail
 
 REPO_URL="https://github.com/poruto/stream-finder-torrent.git"
 DIR="$HOME/stream-finder-torrent"
 TS_TAG="${TORRSERVER_TAG:-MatriX.147}"
+SV="$PREFIX/var/service"
 
 echo "==> Installing packages"
 # --force-confnew: never stop and ask about changed config files (stdin is the curl pipe).
 APT_OPTS=(-y -o Dpkg::Options::=--force-confnew)
 pkg update "${APT_OPTS[@]}"
-pkg install "${APT_OPTS[@]}" python git curl ffmpeg   # ffmpeg includes ffprobe
+pkg install "${APT_OPTS[@]}" python git curl ffmpeg termux-services procps   # ffmpeg includes ffprobe
 
 if [ -d "$DIR/.git" ]; then
   # fetch + reset (not pull): works for the shallow clone even after a force-push
@@ -38,8 +41,9 @@ case "$(uname -m)" in
   *) echo "Unsupported CPU: $(uname -m)"; exit 1 ;;
 esac
 mkdir -p bin data/torrserver cache
-curl -fL -o bin/torrserver "https://github.com/YouROK/TorrServer/releases/download/$TS_TAG/TorrServer-android-$ts_arch"
-chmod +x bin/torrserver
+curl -fL -o bin/torrserver.new "https://github.com/YouROK/TorrServer/releases/download/$TS_TAG/TorrServer-android-$ts_arch"
+chmod +x bin/torrserver.new
+mv -f bin/torrserver.new bin/torrserver
 
 if [ ! -f .env ]; then
   cp .env.example .env
@@ -51,16 +55,31 @@ if [ ! -f .env ]; then
   sed -i "s|^HOST=.*|HOST=0.0.0.0|" .env
 fi
 
+echo "==> Installing services"
+# runit service: `run` must stay in the foreground; runit restarts it whenever it exits.
+add_service() {
+  local name="$1" command="$2"
+  mkdir -p "$SV/$name/log"
+  cat > "$SV/$name/run" <<RUN
+#!/data/data/com.termux/files/usr/bin/sh
+exec 2>&1
+cd "$DIR"
+exec $command
+RUN
+  chmod +x "$SV/$name/run"
+  ln -sf "$PREFIX/share/termux-services/svlogger" "$SV/$name/log/run"  # -> \$PREFIX/var/log/sv/$name/current
+  rm -f "$SV/$name/down"  # enabled: starts with the service daemon
+}
+add_service streamfinder-torrserver "./bin/torrserver -p 8090 -d \"$DIR/data/torrserver\" -k"
+add_service streamfinder "gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 120 app:app"
+
 echo "==> Installing the streamfinder command"
 cat > "$PREFIX/bin/streamfinder" <<'SCRIPT'
 #!/data/data/com.termux/files/usr/bin/bash
 # streamfinder start | stop | restart | status | update | logs
 set -uo pipefail
 DIR="$HOME/stream-finder-torrent"
-RUN="$DIR/data/run"
-mkdir -p "$RUN"
-
-running() { [ -f "$RUN/$1.pid" ] && kill -0 "$(cat "$RUN/$1.pid")" 2>/dev/null; }
+SERVICES=(streamfinder-torrserver streamfinder)
 
 phone_ip() {
   python - <<'PY'
@@ -74,54 +93,61 @@ except OSError:
 PY
 }
 
+# The runit supervisor normally starts with every Termux session; make sure it runs now.
+ensure_daemon() {
+  if ! pgrep -f "runsvdir $PREFIX/var/service" >/dev/null; then
+    service-daemon start >/dev/null 2>&1 || true
+    sleep 2
+  fi
+}
+
 start() {
-  command -v termux-wake-lock >/dev/null && termux-wake-lock  # keep running with the screen off
-  cd "$DIR"
-  if ! running torrserver; then
-    nohup ./bin/torrserver -p 8090 -d "$DIR/data/torrserver" -k > "$RUN/torrserver.log" 2>&1 &
-    echo $! > "$RUN/torrserver.pid"
-  fi
-  if ! running app; then
-    nohup gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 120 app:app > "$RUN/app.log" 2>&1 &
-    echo $! > "$RUN/app.pid"
-  fi
+  termux-wake-lock 2>/dev/null || true  # keep running with the screen off
+  ensure_daemon
+  for name in "${SERVICES[@]}"; do sv up "$name"; done
   sleep 3
   status
+  echo
   echo "Open on this phone:  http://127.0.0.1:5000"
   echo "Open on your network: http://$(phone_ip):5000"
 }
 
 stop() {
-  for name in app torrserver; do
-    running "$name" && kill "$(cat "$RUN/$name.pid")" && echo "stopped $name"
-    rm -f "$RUN/$name.pid"
-  done
-  command -v termux-wake-unlock >/dev/null && termux-wake-unlock
+  for name in "${SERVICES[@]}"; do sv down "$name"; done
+  termux-wake-unlock 2>/dev/null || true
 }
 
 status() {
-  for name in torrserver app; do
-    if running "$name"; then echo "$name: running"; else echo "$name: stopped"; fi
-  done
+  ensure_daemon
+  for name in "${SERVICES[@]}"; do sv status "$name"; done
 }
 
-case "${1:-start}" in
+case "${1:-status}" in
   start) start ;;
   stop) stop ;;
-  restart) stop; start ;;
+  restart) ensure_daemon; for name in "${SERVICES[@]}"; do sv restart "$name"; done; status ;;
   status) status ;;
   update)
     git -C "$DIR" fetch --depth 1 origin master && git -C "$DIR" reset --hard origin/master \
-      && pip install -r "$DIR/requirements.txt" && stop && start ;;
-  logs) tail -n 50 -f "$RUN/app.log" "$RUN/torrserver.log" ;;
+      && pip install -r "$DIR/requirements.txt" && ensure_daemon && sv restart streamfinder && status ;;
+  logs) tail -n 50 -f "$PREFIX/var/log/sv/streamfinder/current" "$PREFIX/var/log/sv/streamfinder-torrserver/current" ;;
   *) echo "usage: streamfinder start|stop|restart|status|update|logs"; exit 1 ;;
 esac
 SCRIPT
 chmod +x "$PREFIX/bin/streamfinder"
 
-# Autostart when the phone boots (only if the Termux:Boot app is installed).
+# After a reboot (needs the Termux:Boot app, opened once): take the wake lock and start the
+# service supervisor, which brings both services up.
 mkdir -p "$HOME/.termux/boot"
-printf '#!/data/data/com.termux/files/usr/bin/sh\nstreamfinder start\n' > "$HOME/.termux/boot/streamfinder"
+cat > "$HOME/.termux/boot/streamfinder" <<'BOOT'
+#!/data/data/com.termux/files/usr/bin/sh
+termux-wake-lock
+. "$PREFIX/etc/profile"
+BOOT
 chmod +x "$HOME/.termux/boot/streamfinder"
 
 streamfinder start
+echo
+echo "StreamFinder now runs permanently: it restarts by itself if it crashes."
+echo "For autostart after a reboot install Termux:Boot from F-Droid and open it once."
+echo "Also disable battery optimisation for Termux in Android settings."

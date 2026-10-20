@@ -48,7 +48,9 @@ Install [Termux from F-Droid](https://f-droid.org/packages/com.termux/), then:
 curl -fsSL https://raw.githubusercontent.com/poruto/stream-finder-torrent/master/termux-install.sh | bash
 ```
 
-Afterwards: `streamfinder start | stop | status | update | logs`.
+It runs as an always-on service: restarted if it crashes, and started again when the
+phone boots if [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) is installed.
+Control it with `streamfinder start | stop | restart | status | update | logs`.
 
 ### Development
 
