@@ -1690,7 +1690,7 @@
     } else {
       downloads.append(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
     }
-    // -- AI subtitles first: written from the audio, translated into a language picked here written from the audio, translated into a language picked here
+    // -- AI subtitles first: written from the audio, translated into a language picked here
     if (state.aiAvailable) {
       const target = settings.aiTarget ?? "en";
       const select = el("select", { className: "subs-ai-target", "aria-label": t("ai_target") }, [
