@@ -729,20 +729,21 @@ select option:checked {
   opacity: 1;
 }
 
+/* Poster with its title, year and rating always visible underneath (no hover needed). */
 .poster {
   position: relative;
   display: block;
-  aspect-ratio: 2 / 3;
-  overflow: hidden;
-  border-radius: var(--radius);
-  background: var(--surface-2);
   text-decoration: none;
   transition: transform 0.2s ease;
 }
 .poster img {
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
   object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--surface-2);
 }
 .poster-badge {
   position: absolute;
@@ -757,19 +758,19 @@ select option:checked {
   font-weight: 800;
 }
 .poster-meta {
-  position: absolute;
-  inset: auto 0 0 0;
   display: grid;
   gap: 2px;
-  padding: 36px 10px 10px;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.92), transparent);
-  opacity: 0;
-  transition: opacity 0.2s;
+  padding: 8px 2px 0;
 }
 .poster-title {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .poster-sub {
   display: flex;
@@ -781,10 +782,6 @@ select option:checked {
 .poster:focus-visible {
   z-index: 1;
   transform: scale(1.04);
-}
-.poster:hover .poster-meta,
-.poster:focus-visible .poster-meta {
-  opacity: 1;
 }
 
 .wide-card {
@@ -837,7 +834,6 @@ select option:checked {
   .row-arrow {
     display: none;
   }
-  .poster-meta,
   .wide-remove {
     opacity: 1;
   }
@@ -2617,7 +2613,14 @@ select option:checked {
     grid-auto-columns: 72vw;
   }
   .poster-meta {
-    display: none;
+    padding-top: 6px;
+  }
+  .poster-title {
+    font-size: 12px;
+  }
+  .poster-sub {
+    gap: 6px;
+    font-size: 11px;
   }
   .grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
