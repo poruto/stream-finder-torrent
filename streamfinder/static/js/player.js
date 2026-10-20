@@ -2246,7 +2246,8 @@
           ai.slow = response.status === 504;
           if (!ai.warned) toast(t(response.status === 429 ? "subs_ai_limit" : "subs_ai_slow"));
           ai.warned = true;
-        } else if ([401, 501].includes(response.status) || ++ai.failures > 4) {
+        } else if ([401, 501].includes(response.status) || ++ai.failures > (response.status === 502 ? 1 : 4)) {
+          // 502: the speech server doesn't answer - say so instead of "listening" for a minute.
           ai.stopped = true;
           subsLabel.textContent = t("subs_failed");
           toast(t("subs_ai_failed", { error: data.error || response.statusText }));

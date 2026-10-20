@@ -253,6 +253,28 @@ class Transcriber:
         self._models = None
         self._chat_model: str | None | bool = False  # False = not looked up yet
         self._chat_retry_at = 0.0  # after a failed lookup, not before this (monotonic)
+        self._local_retry_at = 0.0  # using the key while the local server is down
+
+    def _fall_back_to_key(self, error) -> bool:
+        """The local Whisper server doesn't answer but a key is set: use the key for a while
+        instead of failing every window (the server is tried again after 5 minutes)."""
+        if self.provider != "local" or not self.api_key:
+            return False
+        logger.warning(
+            "local Whisper unreachable (%s) - using the API key meanwhile", error
+        )
+        self.provider = "api"
+        self.api_url, self.speech_key = api_url_for(self.api_key), self.api_key
+        self._local_retry_at = time.monotonic() + 300
+        self._models = None
+        return True
+
+    def _back_to_local(self) -> None:
+        if self._local_retry_at and time.monotonic() >= self._local_retry_at:
+            self.provider = "local"
+            self.api_url, self.speech_key = self.local_url or LOCAL_URL, ""
+            self._local_retry_at = 0.0
+            self._models = None
 
     @property
     def available(self) -> bool:
@@ -308,6 +330,7 @@ class Transcriber:
 
     def models(self) -> tuple[str, str | None]:
         """(speech model, chat model or None)."""
+        self._back_to_local()
         if self._models is None:
             try:
                 offered = set(self.list_models())
@@ -316,6 +339,8 @@ class Transcriber:
                     raise TranscribeError(f"speech API error: {e}") from None
                 offered = {"whisper-1"}  # whisper.cpp: one loaded model, no list
             except (requests.RequestException, ValueError) as e:
+                if self._fall_back_to_key(e):
+                    return self.models()
                 raise TranscribeError(f"speech server unreachable: {e}") from None
             speech = pick_speech_model(offered) or (
                 "whisper-1" if self.provider == "local" else None
@@ -578,6 +603,8 @@ class Transcriber:
                 timeout=90,
             )
         except requests.RequestException as e:
+            if isinstance(e, requests.ConnectionError) and self._fall_back_to_key(e):
+                return self.transcribe(audio, language, task)
             raise TranscribeError(f"speech API unreachable: {e}") from None
         self._raise_for(response)
         return response.json()

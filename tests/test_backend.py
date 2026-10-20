@@ -264,3 +264,43 @@ def test_subtitle_downloaded_once_for_parallel_requests(tmp_path, monkeypatch):
         thread.join()
     assert results == [VTT] * 3 and downloads == ["os-1"]
     assert [p.suffix for p in tmp_path.iterdir()] == [".vtt"]  # no temporary file left
+
+
+def test_local_whisper_down_falls_back_to_the_key(monkeypatch):
+    import requests
+
+    from streamfinder.subtitles import transcribe
+
+    t = Transcriber(_FakeTranscoder(), "gsk_test", "http://127.0.0.1:1/v1", "local")
+    calls = []
+
+    def list_models(key=None, url=None):
+        calls.append(t.api_url)
+        if t.provider == "local":
+            raise requests.ConnectionError("refused")
+        return ["whisper-large-v3-turbo", "llama-3.3-70b-versatile"]
+
+    monkeypatch.setattr(t, "list_models", list_models)
+    monkeypatch.setattr(t, "chat_model", lambda: "llama-3.3-70b-versatile")
+    speech, _ = t.models()
+    assert t.provider == "api" and t.api_url == transcribe.GROQ_URL
+    assert speech == "whisper-large-v3-turbo"
+    # After 5 minutes the local server is tried again.
+    t._local_retry_at = 1.0
+    t._back_to_local()
+    assert t.provider == "local" and t.api_url == "http://127.0.0.1:1/v1"
+
+
+def test_local_whisper_down_without_a_key_still_fails(monkeypatch):
+    import requests
+
+    from streamfinder.subtitles.transcribe import TranscribeError
+
+    t = Transcriber(_FakeTranscoder(), "", "http://127.0.0.1:1/v1", "local")
+    monkeypatch.setattr(t, "list_models", lambda *a: (_ for _ in ()).throw(requests.ConnectionError("refused")))
+    try:
+        t.models()
+    except TranscribeError as e:
+        assert "unreachable" in str(e)
+    else:
+        raise AssertionError("expected TranscribeError")
