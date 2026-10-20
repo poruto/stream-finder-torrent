@@ -40,6 +40,9 @@ def create_app(testing: bool = False) -> Flask:
     app.register_blueprint(api)
     app.register_blueprint(shared)
     app.register_blueprint(library)
+    from .upcoming import upcoming_bp
+
+    app.register_blueprint(upcoming_bp)
 
     # Globals (not a context processor) so that imported macros can translate too.
     app.jinja_env.globals.update(

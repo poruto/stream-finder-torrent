@@ -33,6 +33,7 @@
       <a href="{{ url_for('web.home') }}" {% if endpoint == 'web.home' %}aria-current="page"{% endif %}>{{ t('nav_home') }}</a>
       <a href="{{ url_for('web.movies') }}" {% if endpoint == 'web.movies' %}aria-current="page"{% endif %}>{{ t('nav_movies') }}</a>
       <a href="{{ url_for('web.shows') }}" {% if endpoint == 'web.shows' %}aria-current="page"{% endif %}>{{ t('nav_shows') }}</a>
+      <a href="{{ url_for('upcoming.page') }}" {% if endpoint == 'upcoming.page' %}aria-current="page"{% endif %}>{{ t('nav_calendar') }}</a>
     </nav>
     <form class="nav-search" action="{{ url_for('web.search') }}" role="search">
       <label class="sr-only" for="nav-search-input">{{ t('search_label') }}</label>
@@ -66,7 +67,7 @@
   </footer>
 
   <nav class="tabbar" aria-label="{{ t('nav_main') }}">
-    {% for ep, label, ic in [('web.home', 'nav_home', 'home'), ('web.movies', 'nav_movies', 'film'), ('web.shows', 'nav_shows', 'tv'), ('web.search', 'nav_search', 'search'), ('web.settings', 'nav_settings', 'settings')] %}
+    {% for ep, label, ic in [('web.home', 'nav_home', 'home'), ('web.movies', 'nav_movies', 'film'), ('web.shows', 'nav_shows', 'tv'), ('upcoming.page', 'nav_calendar', 'calendar'), ('web.search', 'nav_search', 'search'), ('web.settings', 'nav_settings', 'settings')] %}
       <a href="{{ url_for(ep) }}" {% if request.endpoint == ep %}aria-current="page"{% endif %}>
         <svg class="icon" aria-hidden="true"><use href="#i-{{ ic }}"/></svg><span>{{ t(label) }}</span>
       </a>

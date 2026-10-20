@@ -1053,6 +1053,78 @@ select option:checked {
   color: var(--text-2);
 }
 
+/* Calendar tab */
+.calendar {
+  display: grid;
+  gap: 22px;
+  margin-top: 8px;
+}
+.calendar-day h2 {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-2);
+  text-transform: capitalize;
+}
+.calendar-day h2.is-today {
+  color: var(--brand);
+}
+.calendar-day ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.calendar-item {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+}
+.calendar-item:hover,
+.calendar-item:focus-visible {
+  background: var(--surface-2);
+}
+.calendar-item img,
+.calendar-noposter {
+  width: 46px;
+  height: 69px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.calendar-text strong {
+  display: block;
+  font-size: 15px;
+}
+.calendar-text small {
+  display: block;
+  font-size: 13px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-tag {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.calendar-tag.is-digital {
+  background: var(--good);
+  color: #000;
+}
+
 /* Storage on the Status page */
 .library {
   margin-top: 36px;

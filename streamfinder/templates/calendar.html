@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav_calendar') }} – StreamFinder{% endblock %}
+{% block content %}
+  <div class="page page-narrow">
+    <header class="page-head">
+      <h1>{{ t('calendar_title') }}</h1>
+      <p class="muted">{{ t('calendar_help', days=days) }}</p>
+    </header>
+    <p class="muted" id="calendar-status">{{ t('calendar_loading') }}</p>
+    <div class="calendar" id="calendar"></div>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ asset('js/calendar.js') }}" defer></script>
+{% endblock %}
