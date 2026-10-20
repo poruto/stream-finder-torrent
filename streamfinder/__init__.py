@@ -6,7 +6,7 @@ import os
 
 from flask import Flask, jsonify, render_template, request, url_for
 
-from . import config, i18n, version
+from . import compression, config, i18n, version
 from .services import Services
 from .tmdb import TMDBError
 
@@ -55,6 +55,7 @@ def create_app(testing: bool = False) -> Flask:
         t=i18n.t,
         plural=i18n.plural,
         js_strings=i18n.js_strings,
+        js_strings_json=i18n.js_strings_json,
         ui_languages=i18n.LANGUAGES,
         subtitle_defaults=config.SUBTITLE_LANGUAGES,
         app_version=version.VERSION,
@@ -92,5 +93,12 @@ def create_app(testing: bool = False) -> Flask:
             response.cache_control.public = True
             response.cache_control.max_age = 31536000 if request.args.get("v") else 300
         return response
+
+    compression.init_app(app)
+
+    if not testing and (
+        not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    ):
+        services.tmdb.persist(config.TMDB_CACHE_FILE)
 
     return app

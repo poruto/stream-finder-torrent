@@ -28,6 +28,15 @@ class LRU(OrderedDict):
             self.move_to_end(key)
             return super().__getitem__(key)
 
+    def clear(self) -> None:
+        with self._lock:
+            super().clear()
+
+    def snapshot(self) -> list:
+        """(key, value) pairs, least recently used first, safe while others write."""
+        with self._lock:
+            return list(self.items())
+
 
 class KeyedLocks:
     """One lock per key, dropped again when nobody holds or waits for it.

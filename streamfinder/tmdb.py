@@ -1,7 +1,11 @@
-"""TMDB API client with an in-memory TTL cache."""
+"""TMDB API client with an in-memory TTL cache that survives restarts."""
 
+import atexit
+import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -10,6 +14,7 @@ from typing import Any
 import requests
 
 from . import config
+from .caching import LRU
 from .matching import normalize_title
 
 logger = logging.getLogger(__name__)
@@ -17,6 +22,8 @@ logger = logging.getLogger(__name__)
 IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 # Titles every detail page needs besides the visitor's language: key -> TMDB locale.
 TITLE_LANGUAGES = {"english_title": "en-US", "czech_title": "cs-CZ"}
+CACHE_SIZE = 2000  # answers kept in memory (the least recently used go first)
+SAVE_EVERY = 600  # seconds between saves of a changed cache to disk
 
 
 class TMDBError(Exception):
@@ -31,23 +38,34 @@ class TMDBClient:
         self.api_key = api_key
         self.language = language
         self.session = requests.Session()
-        self._cache: dict[tuple, tuple] = {}
-        self._lock = threading.Lock()
+        # (path, params) -> (monotonic expiry, wall-clock expiry for the disk, data)
+        self._cache: LRU = LRU(CACHE_SIZE)
+        self._dirty = False  # changed since the last save
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tmdb")
+
+    @staticmethod
+    def _key(path: str, language: str, params: dict[str, Any]) -> tuple:
+        # Without the API key: answers don't depend on it, and it stays off the disk.
+        params = {"language": language, **params}
+        return path, tuple(sorted((k, v) for k, v in params.items() if v is not None))
+
+    def _cached(self, key: tuple) -> dict[str, Any] | None:
+        entry = self._cache.get(key)
+        return entry[2] if entry and entry[0] > time.monotonic() else None
 
     def _get(
         self, path: str, ttl: int = 3600, language: str | None = None, **params
     ) -> dict[str, Any]:
+        language = language or _request_locale(self.language)
+        key = self._key(path, language, params)
+        cached = self._cached(key)
+        if cached is not None:
+            return cached
         params = {
             "api_key": self.api_key,
-            "language": language or _request_locale(self.language),
+            "language": language,
             **{k: v for k, v in params.items() if v is not None},
         }
-        key = (path, tuple(sorted(params.items())))
-        with self._lock:
-            cached = self._cache.get(key)
-            if cached and cached[0] > time.monotonic():
-                return cached[1]
         try:
             response = self.session.get(
                 f"{self.BASE_URL}{path}", params=params, timeout=self.TIMEOUT
@@ -58,15 +76,84 @@ class TMDBClient:
             # requests puts the full URL (incl. api_key) into the message: keep it out of logs.
             message = re.sub(r"api_key=[^&\s)]+", "api_key=***", str(e))
             raise TMDBError(f"TMDB request {path} failed: {message}") from None
-        with self._lock:
-            if len(self._cache) > 2000:
-                self._cache.clear()
-            self._cache[key] = (time.monotonic() + ttl, data)
+        self._cache[key] = (time.monotonic() + ttl, time.time() + ttl, data)
+        self._dirty = True
         return data
 
     def clear_cache(self) -> None:
-        with self._lock:
-            self._cache.clear()
+        self._cache.clear()
+        self._dirty = True
+
+    # -- cache on disk ------------------------------------------------------
+
+    def persist(self, path: str) -> None:
+        """Keep the cache in `path`: loaded now (in the background), saved every
+        few minutes and at exit, so a restarted Raspberry Pi doesn't ask TMDB for
+        everything again. Every answer still expires when its TTL says.
+        """
+
+        def run():
+            self.load(path)
+            while True:
+                time.sleep(SAVE_EVERY)
+                self.save(path)
+
+        threading.Thread(target=run, name="tmdb-cache", daemon=True).start()
+        atexit.register(self.save, path)
+
+    def load(self, path: str) -> int:
+        """Answers saved by `save` that are still valid; returns how many."""
+        now, monotonic, loaded = time.time(), time.monotonic(), 0
+        try:
+            with open(path, encoding="utf-8") as f:
+                saved = json.load(f)
+            saved_at = float(saved["saved"])
+            for path_, params, expires, data in saved["entries"]:
+                # At most the time that was left when saved: right after boot the
+                # clock of a Pi without a real-time clock may still be behind.
+                left = min(expires - now, expires - saved_at)
+                key = (path_, tuple((k, v) for k, v in params))
+                if left <= 0 or self._cached(key) is not None:
+                    continue  # expired, or fetched again meanwhile
+                self._cache[key] = (monotonic + left, now + left, data)
+                loaded += 1
+        except FileNotFoundError:
+            return 0
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logger.warning("TMDB cache %s unreadable: %s", path, e)
+        logger.info("TMDB cache: %d answers loaded from %s", loaded, path)
+        return loaded
+
+    def save(self, path: str) -> None:
+        """Write the valid answers to `path` (atomically), if anything changed."""
+        if not self._dirty:
+            return
+        self._dirty = False
+        now = time.monotonic()
+        entries = [
+            [key[0], key[1], wall, data]
+            for key, (expires, wall, data) in self._cache.snapshot()
+            if expires > now
+        ]
+        directory = os.path.dirname(os.path.abspath(path))
+        try:
+            os.makedirs(directory, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {"saved": time.time(), "entries": entries},
+                        f,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                os.replace(tmp_path, path)
+            except BaseException:
+                os.remove(tmp_path)
+                raise
+        except OSError as e:
+            self._dirty = True
+            logger.warning("TMDB cache not saved to %s: %s", path, e)
 
     def check_key(self, api_key: str) -> bool:
         """Whether TMDB accepts this API key."""
@@ -262,17 +349,32 @@ class TMDBClient:
     def imdb_ids(self, items: list[tuple[str, int]]) -> dict[tuple[str, int], str]:
         """IMDb ids for many (media_type, tmdb_id) pairs, fetched concurrently and cached for a week."""
 
+        def path(item):
+            return f"/{item[0]}/{item[1]}/external_ids"
+
         def one(item):
-            media_type, tmdb_id = item
             try:
-                return item, self._get(
-                    f"/{media_type}/{tmdb_id}/external_ids", ttl=7 * 86400
-                ).get("imdb_id")
+                # The server language, as before: worker threads have no request.
+                return item, self._get(path(item), 7 * 86400, self.language).get(
+                    "imdb_id"
+                )
             except TMDBError:
                 return item, None
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            return {item: imdb for item, imdb in pool.map(one, items) if imdb}
+        # Cached ones are answered here: no threads to start for a page seen before.
+        found, missing = {}, []
+        for item in items:
+            cached = self._cached(self._key(path(item), self.language, {}))
+            if cached is None:
+                missing.append(item)
+            elif cached.get("imdb_id"):
+                found[item] = cached["imdb_id"]
+        if missing:
+            with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+                found.update(
+                    (item, imdb) for item, imdb in pool.map(one, missing) if imdb
+                )
+        return {item: found[item] for item in items if item in found}
 
     def season(self, tmdb_id: int, season_number: int) -> dict[str, Any]:
         return self._get(f"/tv/{tmdb_id}/season/{season_number}")
@@ -295,15 +397,28 @@ class TMDBClient:
         # Worker threads have no request: pick the visitor's language here, or rows
         # would come back in the server default (Czech titles and posters on the English site).
         language = _request_locale(self.language)
-        with ThreadPoolExecutor(max_workers=min(8, len(requests_) or 1)) as pool:
-            futures = {
-                name: pool.submit(self._get, path, 600, language, **params)
-                for name, (path, params) in requests_.items()
-            }
+        # Cached rows are taken right away; only the others are fetched in threads.
+        cached = {
+            name: self._cached(self._key(path, language, params))
+            for name, (path, params) in requests_.items()
+        }
+        missing = {
+            name: requests_[name] for name, data in cached.items() if data is None
+        }
+        futures = {}
+        if missing:
+            with ThreadPoolExecutor(max_workers=min(8, len(missing))) as pool:
+                futures = {
+                    name: pool.submit(self._get, path, 600, language, **params)
+                    for name, (path, params) in missing.items()
+                }
         results = {}
-        for name, future in futures.items():
+        for name in requests_:
+            if name not in futures:
+                results[name] = cached[name]
+                continue
             try:
-                results[name] = future.result()
+                results[name] = futures[name].result()
             except TMDBError as e:
                 logger.warning("%s", e)
                 results[name] = {"results": []}

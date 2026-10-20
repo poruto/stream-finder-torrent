@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://image.tmdb.org">
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ asset('css/app.css') }}">
-  <script id="i18n" type="application/json">{{ js_strings() | tojson }}</script>
+  <script id="i18n" type="application/json">{{ js_strings_json() }}</script>
   <script id="defaults" type="application/json">{{ {'subtitles': subtitle_defaults, 'lang': lang} | tojson }}</script>
   {% block head %}{% endblock %}
 </head>

@@ -39,6 +39,10 @@ def _env_list(name: str, default: str) -> list[str]:
 # TMDB
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 LANGUAGE = os.getenv("LANGUAGE", "cs-CZ")
+# TMDB answers are kept here across restarts (each still expires after its own TTL).
+TMDB_CACHE_FILE = os.getenv(
+    "TMDB_CACHE_FILE", os.path.join(BASE_DIR, "cache", "tmdb.json")
+)
 
 # TorrServer
 TORRSERVER_URL = os.getenv("TORRSERVER_URL", "http://127.0.0.1:8090").rstrip("/")

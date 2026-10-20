@@ -127,6 +127,9 @@ _ALLOWED_TAG_RE = re.compile(
 _BARE_AMP_RE = re.compile(
     r"&(?!(?:amp|lt|gt|quot|apos|nbsp|lrm|rlm|#\d+|#x[\da-fA-F]+);)"
 )
+_ASS_TAG_RE = re.compile(r"\{\\[^}]*\}")
+_ASS_BREAK_RE = re.compile(r"\\N|\\n")
+_FONT_RE = re.compile(r"<font[^>]*>|</font>", re.IGNORECASE)
 
 
 def _ms(h, m, s, ms) -> int:
@@ -145,9 +148,17 @@ def _escape(text: str) -> str:
 
 
 def _clean_text(text: str) -> str:
-    text = re.sub(r"\{\\[^}]*\}", "", text)  # ASS override tags {\an8}
-    text = re.sub(r"\\N|\\n", "\n", text)
-    text = re.sub(r"<font[^>]*>|</font>", "", text, flags=re.IGNORECASE)
+    # The substitutions are skipped when their first character is missing (most cues).
+    if "{" in text:
+        text = _ASS_TAG_RE.sub("", text)  # ASS override tags {\an8}
+    if "\\" in text:
+        text = _ASS_BREAK_RE.sub("\n", text)
+    if "<" not in text:
+        text = _escape(text).replace("--&gt;", "→")
+        return "\n".join(
+            line.strip() for line in text.strip().splitlines() if line.strip()
+        )
+    text = _FONT_RE.sub("", text)
     # Escape everything except the tags WebVTT understands.
     parts = []
     last = 0
@@ -203,10 +214,15 @@ def parse_cues(text: str, fps: float | None = None) -> list[tuple]:
                 cues.append((start, end, row.get("text", "")))
         return sorted(cues)
 
-    time_re = _VTT_TIME_RE if text.startswith("WEBVTT") else _SRT_TIME_RE
+    pattern = _VTT_TIME_RE if text.startswith("WEBVTT") else _SRT_TIME_RE
+
+    def timing(line: str):
+        # Every timing line has an arrow: the regex is spared the text lines.
+        return pattern.search(line) if "-->" in line else None
+
     i = 0
     while i < len(lines):
-        match = time_re.search(lines[i])
+        match = timing(lines[i])
         if not match:
             i += 1
             continue
@@ -215,17 +231,12 @@ def parse_cues(text: str, fps: float | None = None) -> list[tuple]:
         i += 1
         body = []
         while i < len(lines) and lines[i].strip():
-            if time_re.search(lines[i]):
+            if timing(lines[i]):
                 break
             body.append(lines[i])
             i += 1
         # Drop a trailing SRT counter that got glued to the cue text.
-        if (
-            body
-            and body[-1].strip().isdigit()
-            and i < len(lines)
-            and time_re.search(lines[i])
-        ):
+        if body and body[-1].strip().isdigit() and i < len(lines) and timing(lines[i]):
             body.pop()
         cues.append((start, end, "\n".join(body)))
     return cues

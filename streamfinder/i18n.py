@@ -1,6 +1,10 @@
 """UI translations. English is the default; the visitor's choice lives in a cookie."""
 
+import functools
+
 from flask import g, has_request_context, request
+from jinja2.utils import htmlsafe_json_dumps
+from markupsafe import Markup
 
 LANGUAGES = {"en": "English", "cs": "Čeština"}
 DEFAULT_LANGUAGE = "en"
@@ -1060,3 +1064,20 @@ def plural(n: int, base: str) -> str:
 def js_strings() -> dict[str, str]:
     """Every string of the current language, for the frontend."""
     return {**STRINGS[DEFAULT_LANGUAGE], **STRINGS[current_language()]}
+
+
+@functools.cache
+def _js_strings_json(lang: str) -> Markup:
+    from flask import current_app
+
+    policies = current_app.jinja_env.policies
+    return htmlsafe_json_dumps(
+        {**STRINGS[DEFAULT_LANGUAGE], **STRINGS[lang]},
+        dumps=policies["json.dumps_function"],
+        **policies["json.dumps_kwargs"],
+    )
+
+
+def js_strings_json() -> Markup:
+    """`js_strings() | tojson`, serialized once per language instead of on every page."""
+    return _js_strings_json(current_language())

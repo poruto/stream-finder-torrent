@@ -137,7 +137,7 @@ class SubtitleService:
         self._meta: LRU = LRU(META_SIZE)
         # One download or translation per cache file at a time.
         self._writing = KeyedLocks()
-        self._hashes: dict[str, str] = {}  # '<hash>:<index>' -> moviehash
+        self._hashes: LRU = LRU(500)  # '<hash>:<index>' -> moviehash
         self._pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="subtitles")
         # OpenSubtitles.org puts downloads behind a bot check at times; then only
         # subtitles the .com API can deliver are offered, for an hour.
@@ -275,7 +275,7 @@ class SubtitleService:
 
     def _moviehash(self, info_hash: str, video: TorrentFile) -> str | None:
         key = f"{info_hash}:{video.index}"
-        if key not in self._hashes:
+        if self._hashes.get(key) is None:
             try:
                 head = self._pool.submit(
                     self.torrserver.read_range, info_hash, video, 0, HASH_CHUNK, 25
@@ -294,7 +294,7 @@ class SubtitleService:
             except (requests.RequestException, ValueError) as e:
                 logger.info("moviehash unavailable for %s: %s", video.name, e)
                 return None
-        return self._hashes[key]
+        return self._hashes.get(key)
 
     def _search_api(
         self,
@@ -340,6 +340,14 @@ class SubtitleService:
     ) -> list[SubtitleCandidate]:
         """One candidate per subtitle; prefer the quota-free .org download."""
         merged: dict[str, SubtitleCandidate] = {}
+        scores: dict[str, float] = {}
+
+        def match(release: str) -> float:
+            # Many subtitles share a release name (one per language, on .com and .org).
+            if release not in scores:
+                scores[release] = release_match_score(release, video_info)
+            return scores[release]
+
         for item in api_items:
             attrs = item.get("attributes", {})
             files = attrs.get("files") or []
@@ -352,9 +360,7 @@ class SubtitleService:
                 attrs.get("machine_translated") or attrs.get("ai_translated")
             )
             release = attrs.get("release") or files[0].get("file_name") or ""
-            score = release_match_score(release, video_info) + _popularity(
-                attrs.get("download_count") or 0
-            )
+            score = match(release) + _popularity(attrs.get("download_count") or 0)
             score += (100 if hash_match else 0) + (
                 3 if attrs.get("from_trusted") else 0
             )
@@ -384,7 +390,7 @@ class SubtitleService:
             if candidate_id in merged or sub.language not in languages:
                 continue
             score = (
-                release_match_score(sub.release, video_info)
+                match(sub.release)
                 + _popularity(sub.downloads)
                 - 5 * max(0, sub.cds - 1)
             )

@@ -702,9 +702,12 @@ def subtitle_vtt(candidate_id: str):
     except Exception as e:  # network / quota errors from providers
         logger.warning("Subtitle %s failed: %s", candidate_id, e)
         return Response(str(e), 502, mimetype="text/plain")
-    return Response(
+    response = Response(
         vtt, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=86400"}
     )
+    # Reopening a title asks again: "304 Not Modified" instead of the whole file.
+    response.add_etag()
+    return response.make_conditional(request)
 
 
 def _key_status() -> dict:
