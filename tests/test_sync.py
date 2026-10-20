@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from streamfinder import subtitle_api as api_module
 from streamfinder import config, create_app
+from streamfinder import subtitle_api as api_module
 from streamfinder.subtitles.sync import (
     Piece,
     align,

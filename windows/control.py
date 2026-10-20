@@ -85,7 +85,9 @@ log = logging.getLogger("streamfinder.windows")
 
 
 def _env() -> dict:
-    return dotenv_values(ENV_FILE, interpolate=False) if os.path.exists(ENV_FILE) else {}
+    return (
+        dotenv_values(ENV_FILE, interpolate=False) if os.path.exists(ENV_FILE) else {}
+    )
 
 
 def _app_port() -> int:
