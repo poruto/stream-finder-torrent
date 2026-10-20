@@ -461,9 +461,8 @@ def _ready_calendar(page):
 
 
 def _ready_status(page):
-    page.wait_for_function(
-        "document.getElementById('library-summary').textContent.trim() !== ''"
-    )
+    page.locator("#panel-storage[data-loaded]").wait_for(state="attached")
+    page.locator("#health [data-check]").first.wait_for()
 
 
 def _ready_settings(page):

@@ -406,3 +406,20 @@ def test_announce_lookup_failure_still_adds_public_trackers(monkeypatch):
     provider._seen[HASH] = None
     trackers = provider.extra_trackers(HASH)  # no network: lookup fails
     assert trackers and all(t.startswith("udp://") for t in trackers)
+
+
+def test_sktorrent_logs_in_first_even_right_after_the_machine_started(monkeypatch):
+    # A freshly started Raspberry Pi: the monotonic clock is near 0.
+    from streamfinder.torrents import sktorrent
+
+    monkeypatch.setattr(sktorrent.time, "monotonic", lambda: 60.0)
+    provider = SkTorrentProvider("user", "pass", 5)
+    posts = []
+
+    def post(url, **kwargs):
+        posts.append(url)
+        raise sktorrent.requests.ConnectionError("unreachable")
+
+    monkeypatch.setattr(provider.session, "post", post)
+    assert not provider.is_available()
+    assert posts  # it really tried to log in

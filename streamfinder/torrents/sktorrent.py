@@ -109,7 +109,7 @@ class SkTorrentProvider:
         self.timeout = timeout
         self.mirrors = [BASE_URL]
         self._lock = threading.Lock()
-        self._logged_in_at = 0.0
+        self._logged_in_at: float | None = None  # not logged in yet
         self._announce: list[str] | None = None
         self._seen: LRU = LRU(SEEN_SIZE)  # info hash -> None
         self.configure(username, password)
@@ -119,7 +119,7 @@ class SkTorrentProvider:
             self.username, self.password = username, password
             self.session = requests.Session()
             self.session.headers["User-Agent"] = USER_AGENT
-            self._logged_in_at = 0.0
+            self._logged_in_at = None
             self._announce = None
 
     @property
@@ -130,7 +130,12 @@ class SkTorrentProvider:
 
     def _login(self, force: bool = False) -> None:
         with self._lock:
-            if not force and time.monotonic() - self._logged_in_at < SESSION_TTL:
+            # (None, not 0: the monotonic clock starts near 0 on a freshly started Pi,
+            # which would look like a login a moment ago.)
+            fresh = self._logged_in_at is not None and (
+                time.monotonic() - self._logged_in_at < SESSION_TTL
+            )
+            if not force and fresh:
                 return
             response = self.session.post(
                 f"{BASE_URL}/login.php",

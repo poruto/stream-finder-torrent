@@ -152,6 +152,7 @@
     renderDisk(data);
     renderCache(data);
     renderTorrents(data);
+    $("panel-storage").dataset.loaded = "1"; // (the browser tests wait for it)
   }
 
   async function load() {
