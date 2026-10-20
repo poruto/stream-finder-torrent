@@ -54,7 +54,8 @@ unzip it anywhere (Documents, a USB stick - not Program Files) and run
 folder, and so are your settings. Windows may warn about an unknown app: *More
 info → Run anyway*.
 
-The browser opens and StreamFinder sits in the tray (bottom right). Right-click
+StreamFinder opens in its own window, like an installed app (Edge or Chrome in app
+mode - no address bar, its own taskbar entry), and sits in the tray (bottom right). Right-click
 the icon for *Start with Windows*, *Check for updates* and *Quit*. It also checks
 for new versions by itself every 30 minutes. When Windows asks whether TorrServer
 and Python may use the network, allow it (private networks) so your TV and phone

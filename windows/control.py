@@ -793,11 +793,57 @@ def update() -> None:
         print("!! The update failed - see the output above.")
 
 
-def open_app() -> None:
-    """Start (when stopped) and open the app in the browser."""
+# The app's own window: Edge (part of every Windows 10/11) or Chrome in app mode - no
+# address bar or tabs, its own taskbar entry, the title bar in the app's colours.
+# A separate browser profile keeps the window size and leaves out extensions.
+WINDOW_PROFILE = os.path.join(CACHE, "window")
+
+
+def _browsers() -> list[str]:
+    roots = [
+        os.getenv(v, "") for v in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA")
+    ]
+    paths = [
+        os.path.join(root, *parts)
+        for parts in (
+            ("Microsoft", "Edge", "Application", "msedge.exe"),
+            ("Google", "Chrome", "Application", "chrome.exe"),
+        )
+        for root in roots
+        if root
+    ]
+    return [p for p in paths if os.path.exists(p)]
+
+
+def window_command(browser: str, url: str) -> list[str]:
+    return [
+        browser,
+        f"--app={url}",
+        f"--user-data-dir={WINDOW_PROFILE}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-features=Translate",  # the app has its own languages
+        "--window-size=1280,800",
+    ]
+
+
+def open_window(url: str) -> None:
+    """The app window; without Edge or Chrome a tab in the default browser."""
+    for browser in _browsers():
+        try:
+            _detach(window_command(browser, url))
+            return
+        except OSError as e:
+            log.warning("can't open %s: %s", browser, e)
+    webbrowser.open(url)
+
+
+def open_app(in_browser: bool = False) -> None:
+    """Start (when stopped) and open the app: its own window, or a browser tab."""
     if not _supervisor():
         start()
-    webbrowser.open(f"http://127.0.0.1:{_app_port()}")
+    url = f"http://127.0.0.1:{_app_port()}"
+    webbrowser.open(url) if in_browser else open_window(url)
 
 
 # --- the tray icon (StreamFinder.exe) ---------------------------------------
@@ -805,6 +851,7 @@ def open_app() -> None:
 TRAY_TEXT = {
     "en": {
         "open": "Open StreamFinder",
+        "open_browser": "Open in the browser",
         "autostart": "Start with Windows",
         "update": "Check for updates",
         "quit": "Quit",
@@ -814,6 +861,7 @@ TRAY_TEXT = {
     },
     "cs": {
         "open": "Otevřít StreamFinder",
+        "open_browser": "Otevřít v prohlížeči",
         "autostart": "Spouštět s Windows",
         "update": "Zkontrolovat aktualizace",
         "quit": "Ukončit",
@@ -899,7 +947,7 @@ def tray(*args: str) -> None:
             if _responds(f"http://127.0.0.1:{port}/api/healthz"):
                 break
             time.sleep(1)
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        open_window(f"http://127.0.0.1:{port}")
 
     def check_update(icon) -> None:
         target = _new_version()
@@ -934,6 +982,9 @@ def tray(*args: str) -> None:
     menu = pystray.Menu(
         pystray.MenuItem(
             text["open"], in_background(lambda icon: open_app()), default=True
+        ),
+        pystray.MenuItem(
+            text["open_browser"], in_background(lambda icon: open_app(in_browser=True))
         ),
         pystray.MenuItem(
             text["autostart"],

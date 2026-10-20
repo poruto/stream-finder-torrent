@@ -409,3 +409,29 @@ def test_command_names(control):
         "install",
         "run",
     }
+
+
+def test_app_window_is_a_browser_in_app_mode(control):
+    command = control.window_command("C:/Edge/msedge.exe", "http://127.0.0.1:5000")
+    assert command[0] == "C:/Edge/msedge.exe"
+    assert "--app=http://127.0.0.1:5000" in command
+    assert (
+        f"--user-data-dir={control.WINDOW_PROFILE}" in command
+    )  # own window size, no extensions
+    assert "--no-first-run" in command
+
+
+def test_app_window_falls_back_to_the_default_browser(control, monkeypatch):
+    opened = []
+    monkeypatch.setattr(control, "_browsers", lambda: [])
+    monkeypatch.setattr(control.webbrowser, "open", opened.append)
+    control.open_window("http://127.0.0.1:5000")
+    assert opened == ["http://127.0.0.1:5000"]
+
+
+def test_app_window_prefers_edge_then_chrome(control, monkeypatch):
+    launched = []
+    monkeypatch.setattr(control, "_browsers", lambda: ["edge.exe", "chrome.exe"])
+    monkeypatch.setattr(control, "_detach", launched.append)
+    control.open_window("http://127.0.0.1:5000")
+    assert len(launched) == 1 and launched[0][0] == "edge.exe"
