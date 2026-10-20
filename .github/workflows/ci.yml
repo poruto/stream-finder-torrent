@@ -24,9 +24,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt pytest ruff
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # Chromium for the headless browser tests in tests/e2e
+      - run: python -m playwright install --with-deps chromium
       - run: ruff check --select E9,F streamfinder tests windows # errors and pyflakes
-      - run: python -m pytest tests -q
+      - run: python -m pytest tests -q # unit tests and the browser tests (tests/e2e)
       - name: Version
         id: version
         run: |

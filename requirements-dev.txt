@@ -1,0 +1,8 @@
+# Development and CI only (the app itself needs requirements.txt):
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m playwright install chromium        # the browser for tests/e2e
+pytest==9.1.1
+ruff==0.16.10
+playwright==1.63.0
+# ffmpeg for the browser tests: makes their test videos and converts audio in the app
+imageio-ffmpeg==0.6.0
