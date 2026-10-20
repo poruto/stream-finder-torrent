@@ -1,7 +1,7 @@
 # StreamFinder + TorrServer (works on Raspberry Pi 4/5 arm64, armv7 and x86-64).
 #
 #   cp .env.example .env   # fill in TMDB_API_KEY (+ OPENSUBTITLES_API_KEY for online subtitles)
-#   docker compose up -d --build
+#   ./docker-up.sh         # ready-made image from GitHub, or built here
 #
 # App:        http://<host>:5000
 # TorrServer: http://<host>:8090
@@ -25,7 +25,11 @@ services:
       - ./data/torrserver/torrents:/opt/ts/torrents
 
   app:
-    build: .
+    build:
+      context: .
+      args:  # the version in the header (docker-up.sh exports them)
+        STREAMFINDER_VERSION: ${STREAMFINDER_VERSION:-dev}
+        STREAMFINDER_COMMIT: ${STREAMFINDER_COMMIT:-}
     image: streamfinder:latest
     container_name: streamfinder
     network_mode: host

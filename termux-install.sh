@@ -38,11 +38,16 @@ if ! pkg install "${APT_OPTS[@]}" ffmpeg || ! ffmpeg -version >/dev/null 2>&1; t
 fi
 
 if [ -d "$DIR/.git" ]; then
-  # fetch + reset (not pull): works for the shallow clone even after a force-push
-  git -C "$DIR" fetch --depth 1 origin master
+  # fetch + reset (not pull): works even after a force-push. The whole history:
+  # the version number is counted from it (an old shallow clone is completed).
+  if [ "$(git -C "$DIR" rev-parse --is-shallow-repository)" = true ]; then
+    git -C "$DIR" fetch --unshallow origin master
+  else
+    git -C "$DIR" fetch origin master
+  fi
   git -C "$DIR" reset --hard origin/master
 else
-  git clone --depth 1 "$REPO_URL" "$DIR"
+  git clone "$REPO_URL" "$DIR"
 fi
 cd "$DIR"
 
@@ -105,10 +110,15 @@ SERVICES=(streamfinder-torrserver streamfinder streamfinder-updater)
 # Local Whisper for AI subtitles, when installed (install-whisper.sh)
 [ -d "$PREFIX/var/service/streamfinder-whisper" ] && SERVICES+=(streamfinder-whisper)
 
-# Install the newest version from GitHub (shallow clone: fetch + reset, works after force-pushes).
+# Install the newest version from GitHub (fetch + reset, works after force-pushes).
 # By hand it also asks for keys that are still missing (the update service has no terminal).
 update() {
-  git -C "$DIR" fetch --depth 1 origin master || return 1
+  # The whole history: the version number is counted from it.
+  if [ "$(git -C "$DIR" rev-parse --is-shallow-repository)" = true ]; then
+    git -C "$DIR" fetch --unshallow origin master || return 1
+  else
+    git -C "$DIR" fetch origin master || return 1
+  fi
   local keys=0
   if [ "$(git -C "$DIR" rev-parse HEAD)" = "$(git -C "$DIR" rev-parse FETCH_HEAD)" ]; then
     bash "$DIR/setup-keys.sh" "$DIR/.env" || keys=$?

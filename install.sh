@@ -31,8 +31,8 @@ echo "Keys and logins can also be entered later on the web: Settings (login admi
 bash setup-keys.sh .env data/cache/settings.env || true  # asks only for what is still missing
 
 mkdir -p data/torrserver/config data/torrserver/torrents data/cache
-echo "==> Building and starting"
-docker compose up -d --build
+echo "==> Starting"
+bash docker-up.sh
 
 # Local Whisper for AI subtitles - on by default, except on 32-bit boards like the
 # Raspberry Pi 3 (too slow; use a Groq key there). Opt out: touch cache/.no-whisper
@@ -50,7 +50,7 @@ enable_local_whisper() {
 enable_local_whisper
 
 echo "==> Enabling automatic updates from GitHub (checked every 5 minutes)"
-chmod +x autoupdate.sh update.sh setup-keys.sh
+chmod +x autoupdate.sh update.sh setup-keys.sh docker-up.sh
 mkdir -p "$HOME/.local/state/streamfinder"
 git rev-parse HEAD > "$HOME/.local/state/streamfinder/deployed"   # what is running now
 cron_line="*/5 * * * * $PWD/autoupdate.sh"

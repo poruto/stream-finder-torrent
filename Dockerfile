@@ -19,6 +19,15 @@ COPY streamfinder streamfinder
 
 RUN useradd --system --uid 1000 app && mkdir -p /app/cache && chown app /app/cache
 USER app
+# Everything that changes lives on the /app/cache volume (also for a plain `docker run`).
+ENV SUBTITLE_CACHE_DIR=/app/cache/subtitles     SETTINGS_FILE=/app/cache/settings.env
+VOLUME /app/cache
+
+# Shown in the header (no .git in the image): set by docker-up.sh and the GitHub build.
+ARG STREAMFINDER_VERSION=dev
+ARG STREAMFINDER_COMMIT=
+ENV STREAMFINDER_VERSION=$STREAMFINDER_VERSION     STREAMFINDER_COMMIT=$STREAMFINDER_COMMIT
+LABEL org.opencontainers.image.source="https://github.com/poruto/stream-finder-torrent"       org.opencontainers.image.description="StreamFinder: self-hosted streaming front end for TorrServer"
 
 EXPOSE 5000
 HEALTHCHECK --interval=60s --timeout=20s --start-period=60s --retries=3 \

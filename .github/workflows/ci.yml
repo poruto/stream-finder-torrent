@@ -1,0 +1,102 @@
+# Every push and pull request: tests. Every push to master is a new version
+# (counted from the commit messages, see streamfinder/version.py) and gets:
+# - the Docker image (amd64, Raspberry Pi arm64 and armv7) that docker-up.sh pulls
+#   instead of building: ghcr.io/poruto/stream-finder-torrent:latest | :<version> | :sha-<commit>
+# - a GitHub release v<version> with the Windows setup .exe (installed copies update from it)
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version is counted over the whole history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest ruff
+      - run: ruff check --select E9,F streamfinder tests windows # errors and pyflakes
+      - run: python -m pytest tests -q
+      - name: Version
+        id: version
+        run: |
+          read -r version commit < <(python streamfinder/version.py)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "StreamFinder $version ($commit)" >> "$GITHUB_STEP_SUMMARY"
+
+  image:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          build-args: |
+            STREAMFINDER_VERSION=${{ needs.test.outputs.version }}
+            STREAMFINDER_COMMIT=${{ needs.test.outputs.commit }}
+          tags: |
+            ghcr.io/poruto/stream-finder-torrent:latest
+            ghcr.io/poruto/stream-finder-torrent:${{ needs.test.outputs.version }}
+            ghcr.io/poruto/stream-finder-torrent:sha-${{ needs.test.outputs.commit }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  windows:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    concurrency: release # one release at a time, in push order
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.test.outputs.version }}
+      COMMIT: ${{ needs.test.outputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build the setup
+        shell: pwsh
+        run: ./windows/build-release.ps1 -Version $env:VERSION -Commit $env:COMMIT
+      - name: Release
+        shell: bash
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.exe --clobber
+          else
+            git log -1 --format=%B > notes.txt
+            gh release create "$tag" dist/*.exe --target "$GITHUB_SHA" \
+              --title "StreamFinder $VERSION" --notes-file notes.txt
+          fi

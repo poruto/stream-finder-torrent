@@ -8,3 +8,8 @@ cache
 data
 torr
 tests
+.venv
+bin
+windows
+build
+dist

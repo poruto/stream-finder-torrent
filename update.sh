@@ -29,8 +29,8 @@ docker compose pull torrserver
 # Run by hand: ask for keys that are still missing (cron has no terminal, skips this).
 bash setup-keys.sh .env data/cache/settings.env || true
 
-echo "==> Rebuilding and restarting"
-docker compose up -d --build
+echo "==> Starting"
+bash docker-up.sh
 
 # Drop dangling images left over from previous builds.
 docker image prune -f
