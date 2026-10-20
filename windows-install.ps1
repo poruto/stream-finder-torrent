@@ -97,13 +97,18 @@ function Install-StreamFinder {
   }
   if (-not (($env:Path -split ';') -contains $commands)) { $env:Path += ";$commands" }
 
+  # The app's port (PORT in .env, 5000 unless changed).
+  $Port = 5000
+  $portLine = Select-String -Path (Join-Path $Dir '.env') -Pattern '^PORT=(\d+)' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($portLine) { $Port = [int]$portLine.Matches[0].Groups[1].Value }
+
   # Phones and TVs on the home network (Private network profile): one admin prompt.
   if (-not (Get-NetFirewallRule -DisplayName 'StreamFinder' -ErrorAction SilentlyContinue)) {
     Write-Host '==> Allowing StreamFinder through the firewall (Windows asks for permission)'
     $basePython = (& "$Venv\python.exe" -c 'import sys; print(sys._base_executable)').Trim()
     $torr = (Join-Path $Dir 'bin\torrserver.exe').Replace("'", "''")
     $py = $basePython.Replace("'", "''")
-    $rules = "New-NetFirewallRule -DisplayName 'StreamFinder' -Direction Inbound -Program '$py' -Protocol TCP -LocalPort 5000 -Action Allow -Profile Private,Domain | Out-Null; " +
+    $rules = "New-NetFirewallRule -DisplayName 'StreamFinder' -Direction Inbound -Program '$py' -Protocol TCP -LocalPort $Port -Action Allow -Profile Private,Domain | Out-Null; " +
       "New-NetFirewallRule -DisplayName 'StreamFinder TorrServer' -Direction Inbound -Program '$torr' -Action Allow -Profile Private,Domain | Out-Null"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($rules))
     try {
@@ -119,7 +124,7 @@ function Install-StreamFinder {
   Write-Host 'StreamFinder now runs in the background from every logon, restarts if it crashes and updates itself.'
   Write-Host 'Other devices: the Wi-Fi/Ethernet network must be "Private" (Settings > Network & internet).'
   Write-Host 'Settings: login admin / admin (change it there). Command: streamfinder start|stop|restart|status|update|logs'
-  Start-Process 'http://127.0.0.1:5000'
+  Start-Process "http://127.0.0.1:$Port"
 }
 
 Install-StreamFinder

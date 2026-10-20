@@ -30,6 +30,9 @@ import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+# The services' environment: taken before anything imports streamfinder.config, whose
+# load_dotenv() would pin today's .env values (keys saved on the web later would be lost).
+BASE_ENV = dict(os.environ)
 
 import requests
 from dotenv import dotenv_values
@@ -136,11 +139,39 @@ def _pids() -> dict:
         return {}
 
 
+_mutexes = []  # kept open for the life of the process
+
+
+def _only_instance(name: str) -> bool:
+    """False when another process already holds the mutex `name`."""
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, f"Local\\StreamFinder-{name}")
+    if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(handle)
+        return False
+    _mutexes.append(handle)
+    return True
+
+
+def _release_instances() -> None:
+    """Before starting this process's successor (which would find the mutex taken)."""
+    while _mutexes:
+        ctypes.windll.kernel32.CloseHandle(_mutexes.pop())
+
+
+def _ours(pid: int) -> bool:
+    """Is `pid` a pythonw.exe of this StreamFinder (pids are reused after a reboot)?"""
+    image = _image(pid)
+    candidates = {PYTHONW, os.path.join(sys.base_prefix, "pythonw.exe")}
+    return bool(image) and os.path.normcase(image) in {
+        os.path.normcase(c) for c in candidates
+    }
+
+
 def _supervisor() -> int | None:
     """Pid of the running supervisor (a pid left over from before a reboot may be reused)."""
     pid = _pids().get("supervisor")
-    image = _image(pid) if pid else None
-    return pid if image and os.path.basename(image).lower() == "pythonw.exe" else None
+    return pid if pid and _ours(pid) else None
 
 
 def _kill_tree(pid: int) -> None:
@@ -178,8 +209,7 @@ def _launch_supervisor() -> None:
 # --- the supervisor ----------------------------------------------------------
 
 
-def _whisper_command() -> list[str]:
-    name = _whisper_model()
+def _whisper_command(name: str) -> list[str]:
     # Physical cores: hyper-threads only slow Whisper down.
     threads = os.getenv("WHISPER_THREADS") or str(
         max(1, min(8, (os.cpu_count() or 4) // 2))
@@ -224,8 +254,9 @@ def _services() -> dict[str, list[str]]:
             "app:app",
         ],
     }
-    if _whisper_ready() and not os.path.exists(os.path.join(CACHE, ".no-whisper")):
-        services["whisper"] = _whisper_command()
+    name = _whisper_model() if os.path.exists(WHISPER_SERVER) else None
+    if name and not os.path.exists(os.path.join(CACHE, ".no-whisper")):
+        services["whisper"] = _whisper_command(name)
     return services
 
 
@@ -240,7 +271,7 @@ def _spawn(name: str, command: list[str]) -> subprocess.Popen:
             stdin=subprocess.DEVNULL,
             stdout=output,
             stderr=subprocess.STDOUT,
-            env=dict(os.environ, PYTHONUNBUFFERED="1", WHISPER_DIR=WHISPER_DIR),
+            env=dict(BASE_ENV, PYTHONUNBUFFERED="1", WHISPER_DIR=WHISPER_DIR),
             creationflags=NO_WINDOW,
         )
 
@@ -317,6 +348,8 @@ def _install_release(url: str, interactive: bool) -> bool:
     except requests.RequestException as e:
         log.error("downloading %s failed: %s", url, e)
         print(f"!! Downloading the new version failed: {e}")
+        with open(FAILED_FILE, "w", encoding="utf-8") as f:
+            f.write(url)
         return False
     script = os.path.join(CACHE, "update.ps1")
     with open(script, "w", encoding="utf-8-sig") as f:
@@ -406,10 +439,11 @@ def run() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    if _supervisor():
-        return  # already running (logon shortcut and `streamfinder start`)
+    if not _only_instance("supervisor"):
+        return  # already running (logon shortcut, tray and `streamfinder start`)
     _kill_leftovers()
     procs: dict[str, subprocess.Popen] = {}
+    _write_pids(procs)
     started: dict[str, float] = {}
     next_update = time.time() + 60
     log.info("supervisor started (pid %s)", os.getpid())
@@ -434,14 +468,20 @@ def run() -> None:
             if time.time() >= next_update:
                 next_update = time.time() + UPDATE_EVERY
                 target = _new_version()
-                if target:
+                if target and RELEASE:
+                    log.info("updating to %s", target)
+                    # Downloaded while everything runs; the helper then stops it all,
+                    # unpacks and starts the new version. Failed: carry on as we are.
+                    if _install_release(target, interactive=False):
+                        return
+                elif target:
                     log.info("updating to %s", target)
                     for proc in procs.values():  # running files can't be replaced
                         _kill_tree(proc.pid)
                     _apply_update(target, interactive=False)
                     os.remove(PID_FILE)
-                    if not RELEASE:  # the update helper starts the new version itself
-                        _launch_supervisor()  # the new version's supervisor
+                    _release_instances()
+                    _launch_supervisor()  # the new version's supervisor
                     return
             time.sleep(2)
     except Exception:
@@ -750,10 +790,13 @@ def update() -> None:
         print(f"Already up to date ({VERSION} {COMMIT})")
         return
     print(f"==> Updating to {target if RELEASE else target[:7]}")
+    if RELEASE:  # the helper stops everything once the download is there
+        if _install_release(target, interactive=True):
+            print("Installing - StreamFinder starts again in a moment.")
+        return
     stop()  # running files can't be replaced
     ok = _apply_update(target, interactive=True)
-    if not RELEASE:  # the update helper starts the new version itself
-        start()
+    start()
     if not ok:
         print("!! The update failed - see the output above.")
 
@@ -801,8 +844,7 @@ def _tray_pid() -> int | None:
             pid = int(f.read().strip())
     except (OSError, ValueError):
         return None
-    image = _image(pid)
-    return pid if image and os.path.basename(image).lower() == "pythonw.exe" else None
+    return pid if _ours(pid) else None
 
 
 def _set_autostart(on: bool) -> None:
@@ -834,7 +876,7 @@ def _set_autostart(on: bool) -> None:
 def tray(*args: str) -> None:
     """StreamFinder.exe: start everything, open the browser and stay in the tray."""
     background = "--background" in args
-    if _tray_pid():  # already running: just open it
+    if not _only_instance("tray"):  # already running: just open it
         if not background:
             open_app()
         return
@@ -873,17 +915,20 @@ def tray(*args: str) -> None:
             icon.notify(text["up_to_date"].format(version=VERSION), "StreamFinder")
             return
         icon.notify(text["updating"], "StreamFinder")
+        if RELEASE:  # the helper stops everything (this tray too) and starts it again
+            if not _install_release(target, interactive=False):
+                icon.notify(text["update_failed"], "StreamFinder")
+            return
         stop()
         if not _apply_update(target, interactive=False):
             _launch_supervisor()
             icon.notify(text["update_failed"], "StreamFinder")
-        elif (
-            not RELEASE
-        ):  # a clone: start the new version (the zip helper does it itself)
-            os.remove(TRAY_PID_FILE)
-            _launch_supervisor()
-            _detach([PYTHONW, os.path.abspath(__file__), "tray", "--background"])
-            icon.stop()
+            return
+        # A clone: start the new version's supervisor and tray.
+        _release_instances()
+        _launch_supervisor()
+        _detach([PYTHONW, os.path.abspath(__file__), "tray", "--background"])
+        icon.stop()
 
     def quit_app(icon) -> None:
         stop()
