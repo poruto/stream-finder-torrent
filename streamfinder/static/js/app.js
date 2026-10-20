@@ -143,6 +143,23 @@
     },
   };
 
+  // Entries saved before the URLs became English (/film/1 -> /movie/1, /serial/1 -> /show/1).
+  const englishUrl = (url) =>
+    url?.replace(/^\/film\//, "/movie/").replace(/^\/serial\//, "/show/");
+  try {
+    const progress = progressStore.read();
+    if (Object.values(progress).some((p) => englishUrl(p.url) !== p.url)) {
+      for (const p of Object.values(progress)) p.url = englishUrl(p.url);
+      progressStore.write(progress);
+    }
+    const list = listStore.read();
+    if (list.some((i) => englishUrl(i.url) !== i.url)) {
+      listStore.write(list.map((i) => ({ ...i, url: englishUrl(i.url) })));
+    }
+  } catch {
+    /* nothing stored yet */
+  }
+
   // Settings: { quality, primary, fallback, auto, autoSwitch, autoNext, volume, muted }
   const settingsStore = store("streamfinder.settings.v1", () => ({}));
   const DEFAULT_SETTINGS = {
@@ -301,7 +318,7 @@
     history.replaceState(
       null,
       "",
-      `/hledat${params.toString() ? `?${params}` : ""}`,
+      `/search${params.toString() ? `?${params}` : ""}`,
     );
     if (!query) {
       searchGrid.replaceChildren();
@@ -396,41 +413,39 @@
         return;
       }
       if (mySeq !== seq) return;
-      const items = data.items
-        .slice(0, 7)
-        .map((item) =>
-          SF.el(
-            "a",
-            {
-              className: "suggest-item",
-              href: item.url,
-              role: "option",
-              "aria-selected": "false",
-            },
-            [
-              SF.el("img", {
-                src: item.poster.replace("/w342/", "/w92/"),
-                alt: "",
-                width: "46",
-                height: "69",
-                loading: "lazy",
-              }),
-              SF.el("span", {}, [
-                SF.el("strong", {}, [item.title]),
-                SF.el("small", {}, [
-                  [item.year, item.type === "movie" ? t("movie") : t("show")]
-                    .filter(Boolean)
-                    .join(" · "),
-                ]),
+      const items = data.items.slice(0, 7).map((item) =>
+        SF.el(
+          "a",
+          {
+            className: "suggest-item",
+            href: item.url,
+            role: "option",
+            "aria-selected": "false",
+          },
+          [
+            SF.el("img", {
+              src: item.poster.replace("/w342/", "/w92/"),
+              alt: "",
+              width: "46",
+              height: "69",
+              loading: "lazy",
+            }),
+            SF.el("span", {}, [
+              SF.el("strong", {}, [item.title]),
+              SF.el("small", {}, [
+                [item.year, item.type === "movie" ? t("movie") : t("show")]
+                  .filter(Boolean)
+                  .join(" · "),
               ]),
-            ],
-          ),
-        );
+            ]),
+          ],
+        ),
+      );
       const all = SF.el(
         "a",
         {
           className: "suggest-all",
-          href: `/hledat?q=${encodeURIComponent(query)}`,
+          href: `/search?q=${encodeURIComponent(query)}`,
         },
         [
           items.length
@@ -480,7 +495,7 @@
       event.preventDefault();
       if (searchInput && getComputedStyle(searchInput.form).display !== "none")
         searchInput.focus();
-      else location.href = "/hledat";
+      else location.href = "/search";
     }
   });
 

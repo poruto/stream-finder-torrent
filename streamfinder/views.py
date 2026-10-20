@@ -291,8 +291,8 @@ def home():
     return render_template("home.html", billboard=billboard, rows=rows)
 
 
-@web.route("/filmy", defaults={"media_type": "movie"}, endpoint="movies")
-@web.route("/serialy", defaults={"media_type": "tv"}, endpoint="shows")
+@web.route("/movies", defaults={"media_type": "movie"}, endpoint="movies")
+@web.route("/shows", defaults={"media_type": "tv"}, endpoint="shows")
 def browse(media_type: str):
     filters = browse_filters(request.args)
     page = browse_page(media_type, filters, 1)
@@ -311,7 +311,7 @@ def browse(media_type: str):
     )
 
 
-@web.route("/hledat")
+@web.route("/search")
 def search():
     query = request.args.get("q", "").strip()
     kind = (
@@ -373,7 +373,7 @@ def _detail_context(media_type: str, tmdb_id: int) -> dict[str, Any]:
     }
 
 
-@web.route("/film/<int:tmdb_id>")
+@web.route("/movie/<int:tmdb_id>")
 def movie(tmdb_id: int):
     context = _detail_context("movie", tmdb_id)
     player = {
@@ -390,7 +390,7 @@ def movie(tmdb_id: int):
     return render_template("detail.html", player=player, **context)
 
 
-@web.route("/serial/<int:tmdb_id>")
+@web.route("/show/<int:tmdb_id>")
 def show(tmdb_id: int):
     context = _detail_context("tv", tmdb_id)
     raw = context["raw"]
@@ -450,14 +450,14 @@ def season_episodes(tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
     ]
 
 
-@web.route("/nastaveni")
+@web.route("/settings")
 def settings():
     return render_template(
         "settings.html", all_languages=LANGUAGE_NAMES, ui_languages=LANGUAGES
     )
 
 
-@web.route("/stav")
+@web.route("/status")
 def status():
     svc = services()
     return render_template(
@@ -472,6 +472,30 @@ def status():
 
 
 # -- old URLs, kept so bookmarks keep working ----------------------------------
+
+# Czech paths used before the URLs were switched to English.
+_RENAMED = {"/filmy": "/movies", "/serialy": "/shows", "/hledat": "/search", "/nastaveni": "/settings", "/stav": "/status"}
+
+
+def _moved(path: str):
+    """301 to the new path, keeping the query string (e.g. ?play=1, ?q=...)."""
+    query = request.query_string.decode()
+    return redirect(f"{path}?{query}" if query else path, 301)
+
+
+for _old, _new in _RENAMED.items():
+    web.add_url_rule(_old, f"legacy{_old.replace('/', '_')}", lambda _new=_new: _moved(_new))
+
+
+@web.route("/film/<int:tmdb_id>")
+def legacy_movie(tmdb_id: int):
+    return _moved(f"/movie/{tmdb_id}")
+
+
+@web.route("/serial/<int:tmdb_id>")
+def legacy_show(tmdb_id: int):
+    return _moved(f"/show/{tmdb_id}")
+
 
 
 @web.route("/title/<media_type>/<int:tmdb_id>")

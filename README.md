@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/poruto/stream-finder-torrent/master
 ```
 
 or, in a clone: `cp .env.example .env`, fill in the keys, `docker compose up -d --build`.
-Open `http://<host>:5000`. Update later with `./update.sh`.
+Open `http://<host>:5000` (pages: `/movies`, `/shows`, `/search`, `/settings`, `/status`). Update later with `./update.sh`.
 
 ### Android (Termux)
 
