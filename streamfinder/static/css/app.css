@@ -2952,8 +2952,13 @@ select option:checked {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* The TorrServer dot, then the profile button flush at the right edge. */
+  .nav-status {
+    order: 1;
+    margin-left: auto;
+  }
   .nav-profile {
-    margin-left: auto; /* at the right, next to the TorrServer dot */
+    order: 2;
   }
   .tabbar a[aria-current="page"] {
     color: var(--text);
