@@ -24,6 +24,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "torrserver_down": "TorrServer is not running – playback won't work",
         "torrserver_down_short": "TorrServer offline",
         "footer_data": "Movie data from {tmdb}, ratings from IMDb, subtitles from OpenSubtitles.",
+        "footer_credit": "Created by {author}",
+        "version": "Version",
         "language": "Language",
         # home
         "play": "Play",
@@ -446,6 +448,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "torrserver_down": "TorrServer neběží – přehrávání nebude fungovat",
         "torrserver_down_short": "TorrServer neběží",
         "footer_data": "Data o filmech z {tmdb}, hodnocení z IMDb, titulky z OpenSubtitles.",
+        "footer_credit": "Vytvořil {author}",
+        "version": "Verze",
         "language": "Jazyk",
         "play": "Přehrát",
         "more_info": "Více informací",

@@ -21,6 +21,7 @@
 
   <header class="nav" id="nav">
     <a class="nav-logo" href="{{ url_for('web.home') }}" aria-label="StreamFinder">StreamFinder</a>
+    <a class="nav-version" href="{{ repo_url }}{% if app_commit %}/commit/{{ app_commit }}{% endif %}" target="_blank" rel="noopener" title="{{ t('version') }} {{ app_version }}{% if app_commit %} ({{ app_commit }}){% endif %}">v{{ app_version }}</a>
     <nav class="nav-links" aria-label="{{ t('nav_main') }}">
       {% set endpoint = request.endpoint or '' %}
       <a href="{{ url_for('web.home') }}" {% if endpoint == 'web.home' %}aria-current="page"{% endif %}>{{ t('nav_home') }}</a>
@@ -51,6 +52,10 @@
 
   <footer class="footer">
     <p>{{ t('footer_data', tmdb='<a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>') | safe }}</p>
+    <p class="footer-credit">
+      StreamFinder v{{ app_version }}{% if app_commit %} ({{ app_commit }}){% endif %} ·
+      {{ t('footer_credit', author='<a href="https://github.com/poruto" target="_blank" rel="noopener">PoruTo</a>') | safe }}
+    </p>
     <a href="{{ url_for('web.status') }}">{{ t('status_title') }}</a>
   </footer>
 

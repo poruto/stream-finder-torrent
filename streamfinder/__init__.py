@@ -6,7 +6,7 @@ import os
 
 from flask import Flask, jsonify, render_template, request, url_for
 
-from . import config, i18n
+from . import config, i18n, version
 from .services import Services
 from .tmdb import TMDBError
 
@@ -25,7 +25,9 @@ def create_app(testing: bool = False) -> Flask:
     app.json.sort_keys = False
     services = Services.create()
     # With the debug reloader only the child process (WERKZEUG_RUN_MAIN) serves requests.
-    if not testing and (not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
+    if not testing and (
+        not config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    ):
         services.imdb.start()
     app.extensions["streamfinder"] = services
 
@@ -42,6 +44,9 @@ def create_app(testing: bool = False) -> Flask:
         js_strings=i18n.js_strings,
         ui_languages=i18n.LANGUAGES,
         subtitle_defaults=config.SUBTITLE_LANGUAGES,
+        app_version=version.VERSION,
+        app_commit=version.COMMIT,
+        repo_url=version.REPO_URL,
     )
 
     @app.context_processor
