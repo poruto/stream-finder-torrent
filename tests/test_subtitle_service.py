@@ -524,11 +524,6 @@ def test_speech_next_to_a_sound_tag_is_kept():
     assert [line.text for line in lines] == ["[door slams] Who is there?"]
 
 
-@pytest.mark.xfail(
-    reason="BUG: the sound-tag filter (_SOUND_TAG) matches any text that starts and "
-    "ends with a bracket, so real speech between two tags is dropped",
-    strict=True,
-)
 def test_speech_between_two_sound_tags_is_kept():
     lines = clean_segments([seg(0, 2, "(sighs) Fine, let's go. (laughs)")], 0, 30)
     assert lines and "Fine, let's go." in lines[0].text
@@ -690,12 +685,6 @@ def test_api_errors_become_transcribe_errors(answer, status, retry):
     assert error.value.status == status and error.value.retry_after == retry
 
 
-@pytest.mark.xfail(
-    reason="BUG: Transcriber._raise_for assumes the error body is "
-    "{'error': {'message': ...}}; servers answering {'error': 'text'} (whisper.cpp, "
-    "proxies) crash with AttributeError instead of a TranscribeError",
-    strict=True,
-)
 def test_plain_string_error_bodies_are_handled():
     with pytest.raises(TranscribeError):
         Transcriber._raise_for(ChatAnswer(500, {"error": "model not loaded"}))

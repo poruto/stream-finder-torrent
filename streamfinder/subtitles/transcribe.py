@@ -99,7 +99,9 @@ def pick_speech_model(offered) -> str | None:
     )
 
 
-_SOUND_TAG = re.compile(r"[\[(♪*].*[\])♪*]|\W*")
+# A line made only of sound tags ("[MUSIC]", "(laughs)", "♪ ... ♪", "*sigh*"),
+# not speech that merely starts and ends with one.
+_SOUND_TAG = re.compile(r"(?:\W*(?:\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪|\*[^*]*\*))*\W*")
 
 
 def _word_times(seg: dict, words: list[dict]) -> tuple[float, float] | None:
@@ -658,10 +660,16 @@ class Transcriber:
         if response.ok:
             return
         retry = response.headers.get("retry-after")
+        # OpenAI/Groq answer {"error": {"message": ...}}; whisper.cpp and proxies
+        # send {"error": "text"} or no JSON at all.
         try:
-            message = response.json().get("error", {}).get("message") or response.text
+            body = response.json()
         except ValueError:
-            message = response.text
+            body = None
+        error = body.get("error") if isinstance(body, dict) else None
+        if isinstance(error, dict):
+            error = error.get("message")
+        message = str(error) if error else response.text or ""
         if response.status_code == 429:
             raise TranscribeError(
                 "speech API limit reached, wait a moment",

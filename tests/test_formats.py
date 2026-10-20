@@ -61,11 +61,6 @@ def test_utf8_wins_over_legacy_guesses():
     assert decode_subtitle(text.encode("utf-8"), "cs") == text
 
 
-@pytest.mark.xfail(
-    reason="BUG: decode_subtitle scores candidates by Czech letters, so cp1252 'è' "
-    "(Italian/French) decodes as cp1250 'č': 'perché è' -> 'perchč č'",
-    strict=True,
-)
 @pytest.mark.parametrize(
     "text, language", [("Ça va très bien.", "fr"), ("Perché è così?", "it")]
 )
@@ -73,11 +68,6 @@ def test_western_legacy_subtitles_keep_their_accents(text, language):
     assert decode_subtitle(text.encode("cp1252"), language) == text
 
 
-@pytest.mark.xfail(
-    reason="BUG: Polish ISO-8859-2 subtitles decode as cp1250 mojibake "
-    "('gęślą' -> 'gę¶l±'): '¶' and '±' are not counted as mojibake",
-    strict=True,
-)
 def test_polish_iso_8859_2():
     text = "Zażółć gęślą jaźń."
     assert decode_subtitle(text.encode("iso-8859-2"), "pl") == text
@@ -139,11 +129,6 @@ def test_webvtt_without_hours_settings_and_notes():
     assert parse_cues(text) == [(1000, 2500, "Hello"), (3600000, 3601000, "Again")]
 
 
-@pytest.mark.xfail(
-    reason="BUG: entities in a WebVTT source file are escaped again, so "
-    "'Tom &amp; Jerry' is shown to the viewer as 'Tom &amp;amp; Jerry'",
-    strict=True,
-)
 def test_webvtt_entities_are_not_escaped_twice():
     original = srt(("00:00:01,000", "00:00:02,000", "<i>Ahoj</i> & nazdar"))
     once = to_webvtt(original)
@@ -156,11 +141,6 @@ def test_srt_converted_once_escapes_ampersands():
     assert vtt == "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTom &amp; Jerry\n"
 
 
-@pytest.mark.xfail(
-    reason="BUG: WebVTT voice/class spans from the source (<v Bob>, <c.yellow>) are "
-    "escaped, so the viewer sees the markup '<v Bob>Hi</v>' as text",
-    strict=True,
-)
 def test_webvtt_voice_spans_are_not_shown_as_text():
     vtt = to_webvtt("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Bob>Hi there</v>\n")
     assert "&lt;" not in vtt and "Hi there" in vtt
@@ -215,11 +195,6 @@ def test_microdvd_default_fps_is_film():
     assert parse_cues("{24}{48}A")[0][:2] == (1001, 2002)  # 23.976 fps
 
 
-@pytest.mark.xfail(
-    reason="BUG: a MicroDVD line without an end frame ('{75}{}text') ends where it "
-    "starts (the 2 s default only applies at frame 0), so to_webvtt drops it",
-    strict=True,
-)
 def test_microdvd_line_without_end_frame_is_shown():
     vtt = to_webvtt("{25}{50}First\n{75}{}Second", fps=25)
     assert "Second" in vtt

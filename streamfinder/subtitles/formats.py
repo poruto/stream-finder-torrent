@@ -37,9 +37,28 @@ _LANGUAGE_TOKENS = {
 
 _CENTRAL_EUROPEAN = {"cs", "sk", "pl", "hu", "sl", "hr", "ro"}
 _CYRILLIC = {"ru", "uk", "bg", "sr"}
-_CS_SK_LETTERS = set("áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽľĺŕôäĽĹŔÔÄ")
-# What Czech letters turn into when cp1250 / ISO-8859-2 are confused.
-_MOJIBAKE = set("¹¾»«©®ąĄ¼") | {chr(c) for c in range(0x80, 0xA0)}
+_CS_SK_LETTERS = "áčďéěíňóřšťúůýžľĺŕôä"
+# Accented letters of each language, to tell which codepage decoded a file right.
+_ALPHABETS = {
+    "cs": "áčďéěíňóřšťúůýž",
+    "sk": "áäčďéíĺľňóôŕšťúýž",
+    "pl": "ąćęłńóśźż",
+    "hu": "áéíóöőúüű",
+    "sl": "čšž",
+    "hr": "čćđšž",
+    "ro": "ăâîșțşţ",
+}
+_WESTERN_LETTERS = "àáâãäåæçèéêëìíîïñòóôõöøùúûüýÿœß"
+# What the letters turn into when cp1250 / ISO-8859-2 are confused.
+_MOJIBAKE = set("¹¾»«©®ąĄ¼±¶") | {chr(c) for c in range(0x80, 0xA0)}
+
+
+def _letters(language: str | None) -> set[str]:
+    if language is None:
+        letters = _CS_SK_LETTERS
+    else:
+        letters = _ALPHABETS.get(language, _WESTERN_LETTERS)
+    return set(letters + letters.upper())
 
 
 def decode_subtitle(data: bytes, language: str | None = None) -> str:
@@ -60,10 +79,13 @@ def decode_subtitle(data: bytes, language: str | None = None) -> str:
     else:
         candidates = ["cp1252", "iso-8859-15", "cp1250"]
 
+    letters = _letters(language)
+
     def quality(text: str) -> float:
-        letters = sum(ch in _CS_SK_LETTERS for ch in text)
-        bad = sum(ch in _MOJIBAKE for ch in text)
-        return letters - 5 * bad
+        good = sum(ch in letters for ch in text)
+        # A real letter of the language ('ą' in Polish) is never mojibake.
+        bad = sum(ch in _MOJIBAKE and ch not in letters for ch in text)
+        return good - 5 * bad
 
     decoded = []
     for encoding in candidates:
@@ -93,7 +115,18 @@ _VTT_TIME_RE = re.compile(
     r"(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})\.(\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})\.(\d{3})"
 )
 _MICRODVD_RE = re.compile(r"^\{(\d+)\}\{(\d*)\}(.*)$")
-_ALLOWED_TAG_RE = re.compile(r"</?(?:i|b|u)>", re.IGNORECASE)
+# Tags WebVTT understands: <i>/<b>/<u>, class and voice spans (<c.yellow>, <v Bob>),
+# ruby and karaoke timestamps. Anything else is escaped and shown as text.
+_ALLOWED_TAG_RE = re.compile(
+    r"</?(?:[ibuc]|ruby|rt)(?:\.[\w-]+)*>"
+    r"|<(?:v|lang)(?:\.[\w-]+)*(?:[ \t][^<>\n]*)?>|</(?:v|lang)>"
+    r"|<(?:\d+:)?\d{2}:\d{2}\.\d{3}>",
+    re.IGNORECASE,
+)
+# A bare '&', not one that already starts an entity (a WebVTT source has "&amp;").
+_BARE_AMP_RE = re.compile(
+    r"&(?!(?:amp|lt|gt|quot|apos|nbsp|lrm|rlm|#\d+|#x[\da-fA-F]+);)"
+)
 
 
 def _ms(h, m, s, ms) -> int:
@@ -107,6 +140,10 @@ def _vtt_time(ms: int) -> str:
     return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"
 
 
+def _escape(text: str) -> str:
+    return _BARE_AMP_RE.sub("&amp;", text).replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _clean_text(text: str) -> str:
     text = re.sub(r"\{\\[^}]*\}", "", text)  # ASS override tags {\an8}
     text = re.sub(r"\\N|\\n", "\n", text)
@@ -115,17 +152,11 @@ def _clean_text(text: str) -> str:
     parts = []
     last = 0
     for match in _ALLOWED_TAG_RE.finditer(text):
-        parts.append(
-            text[last : match.start()]
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        parts.append(match.group(0).lower())
+        parts.append(_escape(text[last : match.start()]))
+        # Lower-case only the tag name: voice names and classes keep their case.
+        parts.append(re.sub(r"^</?\w+", lambda m: m.group(0).lower(), match.group(0)))
         last = match.end()
-    parts.append(
-        text[last:].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    )
+    parts.append(_escape(text[last:]))
     text = "".join(parts).replace("--&gt;", "→")
     return "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
 
@@ -143,11 +174,15 @@ def parse_cues(text: str, fps: float | None = None) -> list[tuple]:
             if not match or match.group(1) == "1" and match.group(2) == "1":
                 continue  # {1}{1}25.000 is an fps header
             start = int(int(match.group(1)) * 1000 / frame_rate)
-            end = (
-                int(int(match.group(2) or match.group(1)) * 1000 / frame_rate)
-                or start + 2000
-            )
+            end = int(int(match.group(2) or 0) * 1000 / frame_rate)
             cues.append((start, end, match.group(3).replace("|", "\n")))
+        # A line without an end frame ("{75}{}text") stays up 2 s, or until the next one.
+        for n, (start, end, body) in enumerate(cues):
+            if end <= start:
+                end = start + 2000
+                if n + 1 < len(cues) and start < cues[n + 1][0] < end:
+                    end = cues[n + 1][0]
+                cues[n] = (start, end, body)
         return cues
 
     if re.search(r"^\[Events\]", text, re.MULTILINE):
