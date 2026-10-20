@@ -25,11 +25,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      # Chromium for the headless browser tests in tests/e2e
-      - run: python -m playwright install --with-deps chromium
+      # Google Chrome: Playwright's Chromium can't play the H.264/AAC test videos on Linux.
+      - run: python -m playwright install --with-deps chrome
       - run: ruff check streamfinder tests windows # rules in pyproject.toml
       - run: ruff format --check streamfinder tests windows
-      - run: python -m pytest tests -q # unit tests and the browser tests (tests/e2e)
+      - run: python -m pytest tests -q -rs # unit tests and the browser tests (tests/e2e)
+        env:
+          E2E_BROWSER_CHANNEL: chrome
       - name: Version
         id: version
         run: |

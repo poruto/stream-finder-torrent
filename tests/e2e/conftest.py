@@ -150,7 +150,10 @@ def playwright_instance():
 def browser(playwright_instance):
     try:
         browser = playwright_instance.chromium.launch(
-            args=["--autoplay-policy=no-user-gesture-required", "--mute-audio"]
+            # E2E_BROWSER_CHANNEL=chrome (CI): Google Chrome, which plays H.264/AAC on
+            # Linux too; Playwright's own Chromium skips the playback tests there.
+            channel=os.getenv("E2E_BROWSER_CHANNEL") or None,
+            args=["--autoplay-policy=no-user-gesture-required", "--mute-audio"],
         )
     except PlaywrightError as e:
         pytest.skip(

@@ -366,9 +366,15 @@ def test_sktorrent_without_login_searches_nothing():
     assert provider.extra_trackers(HASH) == []
 
 
-def test_sktorrent_unreachable_is_a_connection_error():
+def test_sktorrent_unreachable_is_a_connection_error(monkeypatch):
+    import requests
+
     from streamfinder.torrents.search import SearchQuery
 
+    def offline(*args, **kwargs):  # no real network: the site is simply unreachable
+        raise requests.ConnectionError("unreachable")
+
+    monkeypatch.setattr(requests.Session, "request", offline)
     provider = SkTorrentProvider("user", "pass", 5)
     with pytest.raises(ConnectionError):
         provider.search(SearchQuery(title="Pelisky", titles=["Pelisky"]))
