@@ -1021,6 +1021,11 @@
   // Index of the audio track to play: the user's pick, else Czech/Slovak if wanted, else the first.
   function preferredAudio(tracks) {
     if (tracks.length < 2) return 0;
+    const remembered = titlePrefs().audio;
+    if (remembered) {
+      const index = tracks.findIndex((a) => (a.language || "").toLowerCase() === remembered);
+      if (index >= 0) return index;
+    }
     if (SF.settings.czech()) {
       const czech = tracks.findIndex((a) => ["cze", "ces", "cs", "slk", "slo", "sk"].includes((a.language || "").toLowerCase()));
       if (czech > 0) return czech;
@@ -1084,6 +1089,7 @@
     const track = current?.probe?.audio?.[index];
     if (!track || index === (current.audioTrack || 0)) return closeMenus();
     current.audioTrack = index;
+    if (track.language) rememberPref({ audio: track.language.toLowerCase() });
     closeMenus();
     renderAudioMenu();
     toast(t("audio_switching", { name: audioLabel(track, index).name }));
@@ -1888,6 +1894,40 @@
     }
   }
 
+  // ------------------------------------------------------------- per-title choices
+  // Subtitles and audio picked by hand are kept with the title's progress (and so shared
+  // by every device): the next episode starts with the same ones.
+  const titlePrefs = () => progress.get(progressKey)?.prefs || {};
+  function rememberPref(change) {
+    progress.set(progressKey, { prefs: { ...titlePrefs(), ...change } });
+    if (ctx.media_type === "tv") toast(t("remembered_for_show"));
+  }
+  function rememberSubtitle() {
+    const sub = state.activeSub;
+    if (!sub && subsLabel.textContent !== t("subs_off")) return; // it failed: not a choice
+    rememberPref({
+      subs: !sub
+        ? { off: true }
+        : sub.source === "ai"
+          ? { ai: sub.translate || "" }
+          : sub.translatedFrom
+            ? { translate: sub.language, from: sub.translatedFrom }
+            : { language: sub.language },
+    });
+  }
+  // The remembered subtitle among this file's candidates; undefined = no (usable) choice.
+  function rememberedSubtitle(candidates, best) {
+    const pref = titlePrefs().subs;
+    if (!pref) return undefined;
+    if (pref.off) return null;
+    if (pref.ai !== undefined) return state.aiAvailable ? aiCandidate(pref.ai) : undefined;
+    if (pref.translate) {
+      const from = candidates.find((c) => c.language === pref.from) || best;
+      return from ? translatedCandidate(from, pref.translate) : undefined;
+    }
+    return candidates.find((c) => c.language === pref.language);
+  }
+
   async function loadSubtitles() {
     const current = state.current;
     state.subs = [];
@@ -1910,6 +1950,8 @@
       state.translators = data.translators || ["google"];
       subsBtn.disabled = false;
       renderSubsMenu();
+      const remembered = rememberedSubtitle(data.candidates, data.best);
+      if (remembered !== undefined) return await applySubtitle(remembered);
       const settings = SF.settings.get();
       if (!settings.auto || (!data.candidates.length && !(settings.subsMissing === "ai" && state.aiAvailable))) {
         subsLabel.textContent = data.candidates.length
@@ -1954,7 +1996,10 @@
           el("span", { className: "subs-text" }, [el("strong", {}, [title]), detail ? el("small", {}, [detail]) : null]),
         ],
       );
-      button.addEventListener("click", onClick);
+      button.addEventListener("click", async () => {
+        await onClick();
+        rememberSubtitle();
+      });
       return button;
     };
     const heading = (text) => el("div", { className: "subs-group" }, [text]);
