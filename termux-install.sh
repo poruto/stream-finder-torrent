@@ -4,7 +4,8 @@
 #
 # Installs Python, git, ffmpeg (audio conversion), the app and TorrServer and runs both
 # as always-on services (termux-services / runit: restarted if they crash, started again
-# after a reboot with Termux:Boot). Control them with:
+# after a reboot with Termux:Boot). A third service installs new versions from GitHub
+# every 30 minutes. Control them with:
 #   streamfinder start | stop | restart | status | update | logs
 set -euo pipefail
 
@@ -80,14 +81,31 @@ RUN
 }
 add_service streamfinder-torrserver "./bin/torrserver -p 8090 -d \"$DIR/data/torrserver\" -k"
 add_service streamfinder "gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 120 app:app"
+# Checks GitHub every 30 minutes and installs a new version when there is one.
+add_service streamfinder-updater "sh -c 'sleep 60; while true; do $PREFIX/bin/streamfinder auto-update; sleep 1800; done'"
 
 echo "==> Installing the streamfinder command"
 cat > "$PREFIX/bin/streamfinder" <<'SCRIPT'
 #!/data/data/com.termux/files/usr/bin/bash
-# streamfinder start | stop | restart | status | update | logs
+# streamfinder start | stop | restart | status | update | auto-update | logs
 set -uo pipefail
 DIR="$HOME/stream-finder-torrent"
-SERVICES=(streamfinder-torrserver streamfinder)
+export SVDIR="${SVDIR:-$PREFIX/var/service}"  # `sv` also works from inside a service
+SERVICES=(streamfinder-torrserver streamfinder streamfinder-updater)
+
+# Install the newest version from GitHub (shallow clone: fetch + reset, works after force-pushes).
+update() {
+  git -C "$DIR" fetch --depth 1 origin master || return 1
+  if [ "$(git -C "$DIR" rev-parse HEAD)" = "$(git -C "$DIR" rev-parse FETCH_HEAD)" ]; then
+    echo "$(date '+%F %T') already up to date ($(git -C "$DIR" rev-parse --short HEAD))"
+    return 0
+  fi
+  git -C "$DIR" reset --hard FETCH_HEAD || return 1
+  pip install -q -r "$DIR/requirements.txt" || return 1
+  ensure_daemon
+  sv restart streamfinder
+  echo "$(date '+%F %T') updated to $(git -C "$DIR" rev-parse --short HEAD)"
+}
 
 phone_ip() {
   python - <<'PY'
@@ -135,10 +153,9 @@ case "${1:-status}" in
   stop) stop ;;
   restart) ensure_daemon; for name in "${SERVICES[@]}"; do sv restart "$name"; done; status ;;
   status) status ;;
-  update)
-    git -C "$DIR" fetch --depth 1 origin master && git -C "$DIR" reset --hard origin/master \
-      && pip install -r "$DIR/requirements.txt" && ensure_daemon && sv restart streamfinder && status ;;
-  logs) tail -n 50 -f "$PREFIX/var/log/sv/streamfinder/current" "$PREFIX/var/log/sv/streamfinder-torrserver/current" ;;
+  update) update && status ;;
+  auto-update) update ;;  # used by the streamfinder-updater service
+  logs) tail -n 50 -f "$PREFIX"/var/log/sv/streamfinder*/current ;;
   *) echo "usage: streamfinder start|stop|restart|status|update|logs"; exit 1 ;;
 esac
 SCRIPT
@@ -156,6 +173,6 @@ chmod +x "$HOME/.termux/boot/streamfinder"
 
 streamfinder start
 echo
-echo "StreamFinder now runs permanently: it restarts by itself if it crashes."
+echo "StreamFinder now runs permanently: it restarts by itself if it crashes and updates itself from GitHub."
 echo "For autostart after a reboot install Termux:Boot from F-Droid and open it once."
 echo "Also disable battery optimisation for Termux in Android settings."

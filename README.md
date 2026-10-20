@@ -38,7 +38,11 @@ curl -fsSL https://raw.githubusercontent.com/poruto/stream-finder-torrent/master
 ```
 
 or, in a clone: `cp .env.example .env`, fill in the keys, `docker compose up -d --build`.
-Open `http://<host>:5000` (pages: `/movies`, `/shows`, `/search`, `/settings`, `/status`). Update later with `./update.sh`.
+Open `http://<host>:5000` (pages: `/movies`, `/shows`, `/search`, `/settings`, `/status`).
+
+`install.sh` also adds a cron job (`autoupdate.sh`, every 5 minutes) that rebuilds and
+restarts the app whenever GitHub `master` has a new commit; the log is in
+`~/.local/state/streamfinder/autoupdate.log`. Update by hand with `./update.sh`.
 
 ### Android (Termux)
 
@@ -50,6 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/poruto/stream-finder-torrent/master
 
 It runs as an always-on service: restarted if it crashes, and started again when the
 phone boots if [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) is installed.
+It checks GitHub every 30 minutes and installs new versions by itself.
 Control it with `streamfinder start | stop | restart | status | update | logs`.
 
 ### Development

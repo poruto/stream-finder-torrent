@@ -37,6 +37,13 @@ mkdir -p data/torrserver/config data/torrserver/torrents data/cache
 echo "==> Building and starting"
 docker compose up -d --build
 
+echo "==> Enabling automatic updates from GitHub (checked every 5 minutes)"
+chmod +x autoupdate.sh update.sh
+mkdir -p "$HOME/.local/state/streamfinder"
+git rev-parse HEAD > "$HOME/.local/state/streamfinder/deployed"   # what is running now
+cron_line="*/5 * * * * $PWD/autoupdate.sh"
+( crontab -l 2>/dev/null | grep -v "autoupdate.sh"; echo "$cron_line" ) | crontab -
+
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo
 echo "StreamFinder: http://${ip:-localhost}:5000"
