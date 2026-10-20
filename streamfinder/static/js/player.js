@@ -135,7 +135,11 @@
       v.browser === true
         ? el("span", { className: "browser-ok" }, [t("browser_ok")])
         : v.browser === false
-          ? el("span", { className: "browser-no", title: t("browser_no_title") }, [t("browser_no")])
+          ? el(
+              "span",
+              { className: "browser-no", title: t("browser_no_title") },
+              [t("browser_no")],
+            )
           : null,
       v.languages.length ? el("span", {}, [v.languages.join(", ")]) : null,
     ];
@@ -317,10 +321,10 @@
                     width: "300",
                     height: "169",
                   })
-                : null,
+                : el("span", { className: "thumb-blank", "aria-hidden": "true" }, [icon("tv")]),
               aired
                 ? el("span", { className: "play-badge" }, [icon("play")])
-                : null,
+                : el("span", { className: "release-badge" }, [airLabel(ep)]),
               p && p.duration
                 ? el("div", { className: "progress" }, [
                     el("i", {
@@ -383,6 +387,29 @@
       list.removeAttribute("aria-busy");
     }
   });
+
+  // Season episode lists, so episodes outside the season on screen can be checked too.
+  const seasonCache = new Map();
+  async function seasonEpisodes(season) {
+    if (season === state.season) return state.episodes;
+    if (!seasonCache.has(season)) {
+      const request = api(`/api/season/${ctx.tmdb_id}/${season}`).then((d) => d.episodes);
+      request.catch(() => seasonCache.delete(season));
+      seasonCache.set(season, request);
+    }
+    return seasonCache.get(season);
+  }
+
+  // Fill in name/air date/runtime for a bare {season, episode}; null if it doesn't exist.
+  async function resolveEpisode(target) {
+    if (!isTV || !hasSeason(target) || target.airDate) return target;
+    try {
+      const ep = (await seasonEpisodes(target.season)).find((e) => e.episode === target.episode);
+      return ep ? episodeTarget(ep) : null;
+    } catch {
+      return target; // unknown: let the torrent search decide
+    }
+  }
 
   function nextEpisodeOf(target) {
     if (!isTV || !hasSeason(target)) return null;
@@ -604,8 +631,15 @@
       auto = false,
     } = {},
   ) {
-    if (hasSeason(target) && target.airDate && !isAired(target.airDate)) return;
     closeSheet();
+    target = (await resolveEpisode(target)) || target;
+    if (hasSeason(target) && target.airDate && !isAired(target.airDate)) {
+      openPlayer(target);
+      showMessage(t("not_released"), t("episode_airs_on", { date: new Date(target.airDate).toLocaleDateString(SF.lang) }), [
+        actionButton(t("close"), closePlayer, true),
+      ]);
+      return;
+    }
     openPlayer(target);
     const saved = progress.get(progressKey) || {};
     const stored = storedFor(target);
@@ -696,14 +730,19 @@
         file: data.file,
         files: data.files,
         magnet: data.magnet,
+        streamUrl: data.stream_url,
       };
-      setStep("buffer", data.file.name);
       renderFiles(data.files, data.file);
-      startVideo(data.stream_url, startAt);
+      const mode = await chooseMode(state.current);
+      if (state.current?.hash !== data.hash) return; // another play() started meanwhile
+      setStep("buffer", data.file.name);
+      if (mode) await startConverted(startAt, mode);
+      else startVideo(data.stream_url, startAt);
       loadSubtitles();
-      const next = nextEpisodeOf(target);
-      $("next-btn").hidden = !next;
-      $("next-btn").onclick = () => next && play(next, { resume: false });
+      const next = await resolveEpisode(nextEpisodeOf(target) || {});
+      const nextAvailable = next && hasSeason(next) && (!next.airDate || isAired(next.airDate));
+      $("next-btn").hidden = !nextAvailable;
+      $("next-btn").onclick = () => nextAvailable && play(next, { resume: false });
     } catch (error) {
       showMessage(t("play_failed_title"), error.message, [
         actionButton(t("choose_other"), () => openSheet(target), true),
@@ -717,16 +756,86 @@
     }
   }
 
-  function startVideo(url, startAt) {
-    clearTracks();
+  // ------------------------------------------------------------- converted playback
+  // Files whose audio (AC3/DTS/...) or container (Matroska outside Chromium) the
+  // browser can't handle are streamed through ffmpeg: video copied, audio -> AAC.
+  // The stream then starts at `offset`, so all positions go through pos()/dur().
+
+  const isChromium = Boolean(navigator.userAgentData?.brands?.some((b) => b.brand === "Chromium"));
+  const converted = () => state.current?.convert;
+  const pos = () => (converted() ? converted().offset + video.currentTime : video.currentTime);
+  const dur = () => {
+    if (converted()) return converted().duration || 0;
+    return Number.isFinite(video.duration) ? video.duration : 0;
+  };
+
+  // null = play the file directly, else { copyAudio } for the ffmpeg route.
+  async function chooseMode(current) {
+    const always = SF.settings.get().alwaysConvert;
+    if (current.torrent?.browser === true && !always) return null; // known AAC/H.264: no need to look
+    let info;
+    try {
+      info = await api(`/api/probe/${current.hash}/${current.file.index}`);
+    } catch {
+      return null;
+    }
+    if (!info.available || !info.probed) return null;
+    current.probe = info;
+    if (always) return { copyAudio: info.audio_ok };
+    if (!info.audio_ok) return { copyAudio: false };
+    if (info.matroska && !isChromium) return { copyAudio: true };
+    return null;
+  }
+
+  async function startConverted(position, mode) {
+    const current = state.current;
+    let start = 0;
+    if (position > 1) {
+      try {
+        start = (await api(`/api/keyframe/${current.hash}/${current.file.index}?t=${position.toFixed(1)}`)).start;
+      } catch {
+        start = position;
+      }
+    }
+    if (current !== state.current) return;
+    current.convert = { offset: start, duration: current.probe?.duration || 0, copyAudio: mode.copyAudio };
+    const url = `/api/transcode/${current.hash}/${current.file.index}.mp4?start=${start}${mode.copyAudio ? "&copy=1" : ""}`;
+    // Land exactly on the requested second once the stream (starting at the keyframe) is playing.
+    const skipTo = position - start;
+    startVideo(url, skipTo > 0.5 ? skipTo : 0, { keepTracks: true });
+    applyOffset();
+  }
+
+  function seekTo(position) {
+    const target = Math.min(Math.max(0, position), Math.max(0, dur() - 1));
+    const convert = converted();
+    if (!convert) {
+      video.currentTime = target;
+      return;
+    }
+    // Inside what is already loaded: a normal seek. Otherwise restart ffmpeg there.
+    const local = target - convert.offset;
+    const buffered = video.buffered;
+    for (let i = 0; i < buffered.length; i++) {
+      if (local >= buffered.start(i) && local <= buffered.end(i)) {
+        video.currentTime = local;
+        return;
+      }
+    }
+    state.seekedAt = Date.now();
+    $("player-buffering").hidden = false;
+    startConverted(target, { copyAudio: convert.copyAudio });
+  }
+
+  function startVideo(url, startAt, { keepTracks = false } = {}) {
+    if (!keepTracks) clearTracks();
     state.stallStart = null;
     applyVolume();
     video.src = url;
     video.addEventListener(
       "loadedmetadata",
       () => {
-        if (startAt > 0 && startAt < video.duration - 10)
-          video.currentTime = startAt;
+        if (startAt > 0 && (converted() || startAt < video.duration - 10)) video.currentTime = startAt;
       },
       { once: true },
     );
@@ -758,14 +867,19 @@
   });
   video.addEventListener("waiting", () => {
     if (!state.current) return;
-    $("player-buffering").hidden = !$("player-loading").hidden ? true : false;
+    // One spinner at a time: the small buffering one only once the loading screen is gone.
+    $("player-buffering").hidden = !$("player-loading").hidden;
     const afterSeek = Date.now() - (state.seekedAt || 0) < SEEK_GRACE;
     if (state.current.started && !afterSeek) state.stallStart ??= Date.now();
   });
   video.addEventListener("playing", () => {
     if (state.current && !state.current.started) {
       const current = state.current;
-      setTimer("audio", () => current === state.current && checkAudio(), AUDIO_CHECK_DELAY);
+      setTimer(
+        "audio",
+        () => current === state.current && checkAudio(),
+        AUDIO_CHECK_DELAY,
+      );
     }
     if (state.current) state.current.started = true;
     state.stallStart = null;
@@ -785,7 +899,7 @@
     const unsupported = code === 3 || code === 4;
     const target = state.current.target;
     const copy = actionButton(t("copy_vlc"), async (event) => {
-      await navigator.clipboard.writeText(video.currentSrc);
+      await navigator.clipboard.writeText(state.current?.streamUrl || video.currentSrc);
       event.target.textContent = t("copied");
     });
     showMessage(
@@ -810,8 +924,8 @@
     if (
       !state.prefetched &&
       state.current &&
-      video.duration &&
-      video.currentTime / video.duration > PREFETCH_AT
+      dur() &&
+      pos() / dur() > PREFETCH_AT
     ) {
       state.prefetched = true;
       const next = nextEpisodeOf(state.current.target);
@@ -853,19 +967,13 @@
 
   function saveProgress(force) {
     const current = state.current;
-    if (
-      !current ||
-      !video.duration ||
-      !Number.isFinite(video.duration) ||
-      !current.started
-    )
-      return;
+    if (!current || !dur() || !current.started) return;
     const now = Date.now();
     if (!force && now - (state.lastSave || 0) < 5000) return;
     state.lastSave = now;
     const entry = {
-      position: Math.floor(video.currentTime),
-      duration: Math.floor(video.duration),
+      position: Math.floor(pos()),
+      duration: Math.floor(dur()),
     };
     const saved = progress.get(progressKey) || {};
     const torrent = current.torrent || {};
@@ -910,7 +1018,11 @@
       $("player-stats").textContent = stats.peers
         ? `${SF.plural(stats.peers, "peers")} · ${speed.toFixed(1)} MB/s`
         : t("finding_peers");
-      if (state.stallStart && Date.now() - state.stallStart > STALL_TIMEOUT && tooSlow(current, stats.download_speed)) {
+      if (
+        state.stallStart &&
+        Date.now() - state.stallStart > STALL_TIMEOUT &&
+        tooSlow(current, stats.download_speed)
+      ) {
         state.stallStart = null;
         switchToFaster("stall");
       }
@@ -995,9 +1107,10 @@
           $("loading-detail").textContent = t("slow_no_alternative");
         return;
       }
-      const position = current.started ? video.currentTime : null;
-      const settled = current.started && video.currentTime > SETTLED_AFTER;
-      const cooledDown = Date.now() - (state.lastSwitchAt || 0) > SWITCH_COOLDOWN;
+      const position = current.started ? pos() : null;
+      const settled = current.started && pos() > SETTLED_AFTER;
+      const cooledDown =
+        Date.now() - (state.lastSwitchAt || 0) > SWITCH_COOLDOWN;
       const go = () =>
         play(current.target, {
           torrent: next,
@@ -1043,7 +1156,9 @@
   function browserDecodesAudio() {
     if (typeof video.webkitAudioDecodedByteCount === "number") {
       // Chrome/Edge: video bytes but no audio bytes = the audio codec isn't supported.
-      return video.webkitVideoDecodedByteCount > 0 ? video.webkitAudioDecodedByteCount > 0 : null;
+      return video.webkitVideoDecodedByteCount > 0
+        ? video.webkitAudioDecodedByteCount > 0
+        : null;
     }
     if (typeof video.mozHasAudio === "boolean") return video.mozHasAudio;
     if (video.audioTracks) return video.audioTracks.length > 0;
@@ -1052,8 +1167,19 @@
 
   async function checkAudio() {
     const current = state.current;
-    if (!current || video.paused || browserDecodesAudio() !== false) return;
+    if (!current || video.paused || converted() || browserDecodesAudio() !== false) return;
     current.torrent = { ...(current.torrent || {}), browser: false };
+    // Best fix: keep this version and let the server convert its audio.
+    if (current.probe?.available !== false) {
+      const info = current.probe || (await api(`/api/probe/${current.hash}/${current.file.index}`).catch(() => null));
+      if (current !== state.current) return;
+      if (info?.available) {
+        current.probe = info;
+        toast(t("converting_audio"));
+        startConverted(pos(), { copyAudio: false });
+        return;
+      }
+    }
     let data;
     try {
       data = await findVersions(current.target);
@@ -1062,7 +1188,12 @@
     }
     if (current !== state.current) return;
     const alternative = data.results.find(
-      (v) => v.browser === true && !v.low && !v.oversized && !state.tried.has(v.hash) && v.hash !== current.hash,
+      (v) =>
+        v.browser === true &&
+        !v.low &&
+        !v.oversized &&
+        !state.tried.has(v.hash) &&
+        v.hash !== current.hash,
     );
     const copy = actionButton(t("copy_vlc"), async (event) => {
       await navigator.clipboard.writeText(video.currentSrc);
@@ -1073,14 +1204,27 @@
       return;
     }
     const label = `${qualityText(alternative)}, ${availabilityText(alternative.availability).toLowerCase()}`;
-    const go = () => play(current.target, { torrent: alternative, resume: false, startAt: video.currentTime, auto: true });
-    if (SF.settings.get().autoSwitch && current.auto && state.switches < MAX_SWITCHES) {
+    const go = () =>
+      play(current.target, {
+        torrent: alternative,
+        resume: false,
+        startAt: pos(),
+        auto: true,
+      });
+    if (
+      SF.settings.get().autoSwitch &&
+      current.auto &&
+      state.switches < MAX_SWITCHES
+    ) {
       state.switches += 1;
       state.lastSwitchAt = Date.now();
       toast(t("no_audio_switch", { label }));
       go();
     } else {
-      toast(t("no_audio_offer", { label }), [actionButton(t("switch_button"), go, true), copy]);
+      toast(t("no_audio_offer", { label }), [
+        actionButton(t("switch_button"), go, true),
+        copy,
+      ]);
     }
   }
 
@@ -1098,23 +1242,24 @@
   }
 
   function updateTimeline() {
-    const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const ratio = duration ? video.currentTime / duration : 0;
+    const duration = dur();
+    const now = pos();
+    const ratio = duration ? Math.min(1, now / duration) : 0;
     seekPlayed.style.width = `${ratio * 100}%`;
     seekThumb.style.left = `${ratio * 100}%`;
+    const offset = converted()?.offset || 0;
     let buffered = 0;
     for (let i = 0; i < video.buffered.length; i++) {
-      if (video.buffered.start(i) <= video.currentTime + 1)
-        buffered = Math.max(buffered, video.buffered.end(i));
+      if (video.buffered.start(i) <= video.currentTime + 1) buffered = Math.max(buffered, offset + video.buffered.end(i));
     }
     seekBuffered.style.width = duration
       ? `${(buffered / duration) * 100}%`
       : "0";
     $("ctl-time").textContent =
-      `${formatTime(video.currentTime)} / ${formatTime(duration)}`;
+      `${formatTime(now)} / ${formatTime(duration)}`;
     seek.setAttribute("aria-valuemax", String(Math.floor(duration)));
-    seek.setAttribute("aria-valuenow", String(Math.floor(video.currentTime)));
-    seek.setAttribute("aria-valuetext", formatTime(video.currentTime));
+    seek.setAttribute("aria-valuenow", String(Math.floor(now)));
+    seek.setAttribute("aria-valuetext", formatTime(now));
   }
   video.addEventListener("progress", updateTimeline);
   video.addEventListener("durationchange", updateTimeline);
@@ -1124,21 +1269,33 @@
     return Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
   };
   let dragging = false;
+  // Direct streams seek while dragging; converted ones once, on release (each seek restarts ffmpeg).
+  let dragRatio = null;
   seek.addEventListener("pointerdown", (event) => {
-    if (!video.duration) return;
+    if (!dur()) return;
     dragging = true;
     seek.setPointerCapture(event.pointerId);
-    video.currentTime = seekRatio(event) * video.duration;
+    dragRatio = seekRatio(event);
+    if (!converted()) seekTo(dragRatio * dur());
   });
   seek.addEventListener("pointermove", (event) => {
-    if (!video.duration) return;
+    if (!dur()) return;
     const ratio = seekRatio(event);
     seekTooltip.hidden = false;
     seekTooltip.style.left = `${ratio * 100}%`;
-    seekTooltip.textContent = formatTime(ratio * video.duration);
-    if (dragging) video.currentTime = ratio * video.duration;
+    seekTooltip.textContent = formatTime(ratio * dur());
+    if (dragging) {
+      dragRatio = ratio;
+      seekPlayed.style.width = `${ratio * 100}%`;
+      seekThumb.style.left = `${ratio * 100}%`;
+      if (!converted()) seekTo(ratio * dur());
+    }
   });
-  seek.addEventListener("pointerup", () => (dragging = false));
+  seek.addEventListener("pointerup", () => {
+    if (dragging && converted() && dragRatio !== null) seekTo(dragRatio * dur());
+    dragging = false;
+    dragRatio = null;
+  });
   seek.addEventListener("pointerleave", () => (seekTooltip.hidden = true));
   seek.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -1154,11 +1311,8 @@
     else video.pause();
   };
   const skip = (seconds) => {
-    if (!video.duration) return;
-    video.currentTime = Math.min(
-      video.duration - 1,
-      Math.max(0, video.currentTime + seconds),
-    );
+    if (!dur()) return;
+    seekTo(pos() + seconds);
     wakeControls();
   };
 
@@ -1370,7 +1524,19 @@
       video.append(track);
       track.track.mode = "showing";
       state.activeSub = candidate;
+      state.subSync = null;
       subsLabel.textContent = candidate.language_name;
+      // Subtitles from the torrent or matched by file hash are made for this file;
+      // everything else gets aligned to the speech once playback has started.
+      if (candidate.source !== "torrent" && !candidate.hash_match) {
+        const current = state.current;
+        const whenPlaying = () => {
+          if (current !== state.current || candidate !== state.activeSub) return;
+          if (video.paused || pos() < 5) return setTimer("subsync", whenPlaying, 3000);
+          syncSubtitles();
+        };
+        setTimer("subsync", whenPlaying, 4000);
+      }
     } catch {
       const alternatives = state.subs.filter(
         (c) => c.language === candidate.language && c.id !== candidate.id,
@@ -1382,17 +1548,58 @@
     renderSubsMenu();
   }
 
+  // Cue time = original * scale + automatic sync + the user's manual offset,
+  // minus the start of a converted stream (whose clock begins at 0 there).
   function applyOffset() {
     const track = video.querySelector("track");
-    if (!track?.track.cues) return;
-    const delta = state.subOffset - Number(track.dataset.offset);
-    if (!delta) return;
-    for (const cue of Array.from(track.track.cues)) {
-      cue.startTime = Math.max(0, cue.startTime + delta);
-      cue.endTime = Math.max(0, cue.endTime + delta);
-    }
-    track.dataset.offset = String(state.subOffset);
+    const cues = track?.track.cues;
+    if (!cues || !cues.length) return;
+    track.originalTimes ??= Array.from(cues, (cue) => [cue.startTime, cue.endTime]);
+    const scale = state.subSync?.scale || 1;
+    const shift = (state.subSync?.offset || 0) + state.subOffset - (converted()?.offset || 0);
+    Array.from(cues).forEach((cue, i) => {
+      const [start, end] = track.originalTimes[i];
+      cue.startTime = Math.max(0, start * scale + shift);
+      cue.endTime = Math.max(0, end * scale + shift);
+    });
   }
+
+  // Align the active subtitle to the speech around the current position.
+  async function syncSubtitles({ manual = false } = {}) {
+    const current = state.current;
+    const sub = state.activeSub;
+    if (!current || !sub) return;
+    const button = $("subs-autosync");
+    button.disabled = true;
+    button.textContent = t("syncing_subs");
+    try {
+      const result = await api("/api/subtitles/sync", {
+        hash: current.hash,
+        file_index: current.file.index,
+        subtitle: sub.id,
+        position: pos(),
+      });
+      if (current !== state.current || sub !== state.activeSub) return;
+      if (result.applied) {
+        state.subSync = { offset: result.offset, scale: result.scale };
+        applyOffset();
+        const drift = Math.abs(result.scale - 1) > 0.001;
+        toast(t(drift ? "subs_synced_fps" : "subs_synced", { s: formatShift(result.offset) }));
+      } else if (manual) {
+        toast(t(result.baseline >= 0.45 ? "subs_already_synced" : "subs_sync_unsure"));
+      }
+    } catch (error) {
+      if (manual) toast(t("subs_sync_failed"));
+    } finally {
+      button.disabled = false;
+      button.textContent = t("sync_by_audio");
+    }
+  }
+
+  const formatShift = (seconds) => {
+    const text = `${seconds > 0 ? "+" : ""}${seconds.toFixed(1)} s`;
+    return SF.lang === "cs" ? text.replace(".", ",") : text;
+  };
 
   function shiftSubtitles(seconds) {
     state.subOffset = Math.round((state.subOffset + seconds) * 100) / 100;
@@ -1412,6 +1619,7 @@
   });
   for (const menu of [subsMenu, episodesMenu])
     menu.addEventListener("click", (event) => event.stopPropagation());
+  $("subs-autosync").addEventListener("click", () => syncSubtitles({ manual: true }));
   document
     .querySelectorAll("[data-sync]")
     .forEach((b) =>
@@ -1597,7 +1805,8 @@
 
     const qualities = [...new Set(main.map((v) => v.quality).filter(Boolean))];
     const mixedBrowser =
-      main.some((v) => v.browser === true) && main.some((v) => v.browser !== true);
+      main.some((v) => v.browser === true) &&
+      main.some((v) => v.browser !== true);
     const filters = $("versions-filters");
     if (main.length > 4 && (qualities.length > 1 || mixedBrowser)) {
       let active = browserOnly && mixedBrowser ? "browser" : "all";

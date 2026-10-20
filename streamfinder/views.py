@@ -1,5 +1,6 @@
 """HTML pages and the presentation helpers shared with the JSON API."""
 
+import math
 import re
 import time
 from typing import Any
@@ -199,13 +200,19 @@ def search_items(query: str, kind: str | None = None) -> list[dict[str, Any]]:
     if match:
         query, year = match.group(1), int(match.group(2))
 
+    wanted = normalize_title(query)
     data = tmdb.search_multi(query)
-    results = []
+    results, people_works = [], []
     for result in data.get("results", []):
-        if result.get("media_type") == "person":
-            results += result.get("known_for") or []  # "Nolan" -> his films
-        else:
+        if result.get("media_type") != "person":
             results.append(result)
+        elif len(wanted) >= 4 and any(
+            part.startswith(wanted) or wanted.startswith(part)
+            for part in [normalize_title(result.get("name") or "")]
+            + normalize_title(result.get("name") or "").split()
+        ):
+            # "nolan" -> his films, but only when the query really is that person's name.
+            people_works += result.get("known_for") or []
     if (data.get("total_pages") or 1) > 1 and len(results) < 20:
         results += [
             r
@@ -213,22 +220,24 @@ def search_items(query: str, kind: str | None = None) -> list[dict[str, Any]]:
             if r.get("media_type") != "person"
         ]
 
-    wanted = normalize_title(query)
-
     def rank(result: dict[str, Any]) -> tuple:
         titles = {
             normalize_title(result.get(k) or "")
             for k in ("title", "name", "original_title", "original_name")
         }
         exact = wanted in titles
+        prefix = any(title.startswith(wanted) for title in titles)
         year_ok = year is None or (
             year_of(result) is not None and abs(year_of(result) - year) <= 1
         )
-        obscure = (result.get("vote_count") or 0) < 10
-        return (not year_ok, not exact, obscure)
+        # Popularity and vote count separate "Interstellar" from obscure exact-word matches.
+        weight = math.log1p(result.get("popularity") or 0) + 0.5 * math.log1p(
+            result.get("vote_count") or 0
+        )
+        return (not year_ok, not exact, -(weight + (3 if prefix else 0)))
 
-    results.sort(key=rank)  # stable: keeps TMDB relevance order inside each group
-    items = cards(results)
+    results.sort(key=rank)
+    items = cards(results + people_works)
     if kind in ("movie", "tv"):
         items = [i for i in items if i["type"] == kind]
     return items

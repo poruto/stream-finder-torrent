@@ -1,6 +1,7 @@
 """TMDB API client with an in-memory TTL cache."""
 
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor

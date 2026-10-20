@@ -90,8 +90,12 @@ class SearchQuery:
     episode: int | None = None
     imdb_id: str | None = None  # 'tt1234567'
     runtime: int | None = None  # minutes, for the bitrate estimate
-    quality: int | None = None  # preferred resolution: 2160 / 1080 / 720, None = automatic
-    season_episodes: dict[int, int] = field(default_factory=dict)  # season -> episode count
+    quality: int | None = (
+        None  # preferred resolution: 2160 / 1080 / 720, None = automatic
+    )
+    season_episodes: dict[int, int] = field(
+        default_factory=dict
+    )  # season -> episode count
     total_episodes: int | None = None
     free_text: bool = False
 
@@ -211,31 +215,45 @@ class TorrentResult:
             "languages": languages,
             "availability": self.availability,
             "gb_per_hour": round(self.gb_per_hour, 2) if self.gb_per_hour else None,
-            "per_episode": format_size(self.per_episode) if pack and self.per_episode else None,
+            "per_episode": format_size(self.per_episode)
+            if pack and self.per_episode
+            else None,
             "oversized": self.oversized,
             "low": self.low,
         }
 
 
-def choose_picks(ranked: list[TorrentResult], quality: int | None = None) -> dict[str, str | None]:
+def choose_picks(
+    ranked: list[TorrentResult], quality: int | None = None
+) -> dict[str, str | None]:
     """Pick the recommended / best-quality / smallest versions (by info hash)."""
     playable = [
         r
         for r in ranked
-        if not r.info.is_cam and not r.info.is_junk and r.raw.seeders >= MIN_STREAM_SEEDERS
+        if not r.info.is_cam
+        and not r.info.is_junk
+        and r.raw.seeders >= MIN_STREAM_SEEDERS
     ]
     # The "best quality" pick may be large (up to what 4K needs), the default may not.
-    quality_pool = [r for r in playable if (r.gb_per_hour or 0) <= GB_PER_HOUR_CAP[2160]]
+    quality_pool = [
+        r for r in playable if (r.gb_per_hour or 0) <= GB_PER_HOUR_CAP[2160]
+    ]
     # Never pick a needlessly huge file by default when a reasonable one exists.
     playable = [r for r in playable if not r.oversized] or playable
     candidates = playable
     if quality:
         # Honour an explicit quality preference whenever such a version is available.
-        preferred = [r for r in playable if (r.info.resolution or 0) == quality and r.raw.seeders >= 5]
+        preferred = [
+            r
+            for r in playable
+            if (r.info.resolution or 0) == quality and r.raw.seeders >= 5
+        ]
         candidates = preferred or playable
     # The player is a browser: prefer a version it can decode if one is reasonably available.
     # 4K is the exception: those are nearly always HEVC, so a 4K fan gets 4K even if it needs VLC.
-    in_browser = [r for r in candidates if r.info.browser_friendly is True and r.raw.seeders >= 5]
+    in_browser = [
+        r for r in candidates if r.info.browser_friendly is True and r.raw.seeders >= 5
+    ]
     if in_browser and quality != 2160:
         recommended = in_browser[0]
     else:
@@ -335,9 +353,7 @@ class TorrentSearcher:
 
         ranked = self._rank(raw, query)
         result = {
-            "results": [
-                r.to_dict() for r in ranked[: config.MAX_TORRENT_RESULTS]
-            ],
+            "results": [r.to_dict() for r in ranked[: config.MAX_TORRENT_RESULTS]],
             "picks": choose_picks(ranked, query.quality),
             "notice": notice_for(ranked),
             "total_found": len({r.info_hash for r in raw}),
@@ -394,7 +410,9 @@ class TorrentSearcher:
             cap = GB_PER_HOUR_CAP[query.quality]
             if result.gb_per_hour and result.gb_per_hour > cap:
                 result.oversized = True
-                result.score = round(result.score - (25 if result.gb_per_hour > 2 * cap else 12), 1)
+                result.score = round(
+                    result.score - (25 if result.gb_per_hour > 2 * cap else 12), 1
+                )
             ranked.append(result)
         ranked.sort(key=lambda r: (r.score, r.raw.seeders), reverse=True)
         return ranked
@@ -403,5 +421,5 @@ class TorrentSearcher:
         availability = list(self._pool.map(lambda p: p.is_available(), self.providers))
         return [
             {"name": p.name, "available": ok, "url": p.mirrors[0]}
-            for p, ok in zip(self.providers, availability)
+            for p, ok in zip(self.providers, availability, strict=True)
         ]

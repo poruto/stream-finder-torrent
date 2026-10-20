@@ -152,6 +152,7 @@
     auto: true,
     autoSwitch: true,
     autoNext: true,
+    alwaysConvert: false,
     volume: 1,
     muted: false,
   };
@@ -182,6 +183,7 @@
     settingsForm.auto.checked = current.auto;
     settingsForm.autoSwitch.checked = current.autoSwitch;
     settingsForm.autoNext.checked = current.autoNext;
+    settingsForm.alwaysConvert.checked = current.alwaysConvert;
     const saved = document.getElementById("settings-saved");
     settingsForm.addEventListener("change", () => {
       SF.settings.set({
@@ -191,6 +193,7 @@
         auto: settingsForm.auto.checked,
         autoSwitch: settingsForm.autoSwitch.checked,
         autoNext: settingsForm.autoNext.checked,
+        alwaysConvert: settingsForm.alwaysConvert.checked,
       });
       saved.textContent = t("saved");
     });
@@ -348,17 +351,123 @@
         });
       });
     } else {
-      // Typing anywhere else jumps to the search page, like streaming apps do.
-      searchInput.addEventListener("input", () => {
-        clearTimeout(searchTimer);
-        const query = searchInput.value.trim();
-        if (query.length >= 2) {
-          searchTimer = setTimeout(() => {
-            location.href = `/hledat?q=${encodeURIComponent(query)}`;
-          }, 600);
-        }
-      });
+      initSuggestions(searchInput);
     }
+  }
+
+  // Instant results under the header search field (Enter opens the full results page).
+  function initSuggestions(input) {
+    const form = input.form;
+    const box = SF.el("div", {
+      className: "suggest",
+      id: "suggest",
+      role: "listbox",
+      hidden: true,
+    });
+    form.append(box);
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-controls", "suggest");
+    input.setAttribute("aria-expanded", "false");
+    let seq = 0;
+    let active = -1;
+
+    const close = () => {
+      box.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      active = -1;
+    };
+    const options = () => [...box.querySelectorAll(".suggest-item")];
+    const highlight = (index) => {
+      const items = options();
+      active = (index + items.length) % items.length;
+      items.forEach((item, i) =>
+        item.setAttribute("aria-selected", String(i === active)),
+      );
+    };
+
+    async function update() {
+      const query = input.value.trim();
+      const mySeq = ++seq;
+      if (query.length < 2) return close();
+      let data;
+      try {
+        data = await SF.api(`/api/search?q=${encodeURIComponent(query)}`);
+      } catch {
+        return;
+      }
+      if (mySeq !== seq) return;
+      const items = data.items
+        .slice(0, 7)
+        .map((item) =>
+          SF.el(
+            "a",
+            {
+              className: "suggest-item",
+              href: item.url,
+              role: "option",
+              "aria-selected": "false",
+            },
+            [
+              SF.el("img", {
+                src: item.poster.replace("/w342/", "/w92/"),
+                alt: "",
+                width: "46",
+                height: "69",
+                loading: "lazy",
+              }),
+              SF.el("span", {}, [
+                SF.el("strong", {}, [item.title]),
+                SF.el("small", {}, [
+                  [item.year, item.type === "movie" ? t("movie") : t("show")]
+                    .filter(Boolean)
+                    .join(" · "),
+                ]),
+              ]),
+            ],
+          ),
+        );
+      const all = SF.el(
+        "a",
+        {
+          className: "suggest-all",
+          href: `/hledat?q=${encodeURIComponent(query)}`,
+        },
+        [
+          items.length
+            ? t("results_for", { q: query })
+            : t("no_results", { q: query }),
+        ],
+      );
+      box.replaceChildren(...items, all);
+      box.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      active = -1;
+    }
+
+    input.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(update, 220);
+    });
+    input.addEventListener(
+      "focus",
+      () => input.value.trim().length >= 2 && update(),
+    );
+    input.addEventListener("keydown", (event) => {
+      if (box.hidden) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        highlight(active + (event.key === "ArrowDown" ? 1 : -1));
+      } else if (event.key === "Enter" && active >= 0) {
+        event.preventDefault();
+        location.href = options()[active].href;
+      } else if (event.key === "Escape") {
+        close();
+      }
+    });
+    document.addEventListener(
+      "click",
+      (event) => !form.contains(event.target) && close(),
+    );
   }
 
   document.addEventListener("keydown", (event) => {
@@ -380,7 +489,8 @@
   filterBar?.querySelectorAll("select").forEach((select) => {
     select.addEventListener("change", () => {
       // Drop empty values so URLs stay short and shareable.
-      for (const field of filterBar.querySelectorAll("select, input")) field.disabled = !field.value;
+      for (const field of filterBar.querySelectorAll("select, input"))
+        field.disabled = !field.value;
       filterBar.submit();
     });
   });
@@ -392,8 +502,17 @@
     const fetchMore = async () => {
       if (loading || !browseGrid.dataset.next) return;
       loading = true;
-      const { type, genre, sort, imdb, decade, lang, next } = browseGrid.dataset;
-      const params = new URLSearchParams({ type, genre, sort, imdb, decade, lang, page: next });
+      const { type, genre, sort, imdb, decade, lang, next } =
+        browseGrid.dataset;
+      const params = new URLSearchParams({
+        type,
+        genre,
+        sort,
+        imdb,
+        decade,
+        lang,
+        page: next,
+      });
       loadMore.disabled = true;
       loadMore.textContent = t("loading");
       try {
@@ -412,9 +531,12 @@
     loadMore.addEventListener("click", fetchMore);
     // Load the next page automatically shortly before the end of the grid.
     if ("IntersectionObserver" in window) {
-      new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && fetchMore(), {
-        rootMargin: "800px 0px",
-      }).observe(loadMore);
+      new IntersectionObserver(
+        (entries) => entries.some((e) => e.isIntersecting) && fetchMore(),
+        {
+          rootMargin: "800px 0px",
+        },
+      ).observe(loadMore);
     }
   }
 

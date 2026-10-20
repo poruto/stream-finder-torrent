@@ -157,7 +157,9 @@ class TorrServerClient:
                 timeout=timeout or self.timeout,
             )
         except requests.ConnectionError as e:
-            raise TorrServerError(f"TorrServer offline ({self.base_url})", "offline") from e
+            raise TorrServerError(
+                f"TorrServer offline ({self.base_url})", "offline"
+            ) from e
         except requests.Timeout as e:
             raise TorrServerError("TorrServer timeout", "timeout") from e
         if response.status_code != 200:

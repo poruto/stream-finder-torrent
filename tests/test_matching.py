@@ -1,4 +1,11 @@
-from streamfinder.matching import MatchTarget, pack_kind, parse_release, release_match_score, score_torrent, title_similarity
+from streamfinder.matching import (
+    MatchTarget,
+    pack_kind,
+    parse_release,
+    release_match_score,
+    score_torrent,
+    title_similarity,
+)
 
 
 def score(name, target, seeders=50, size=2 * 1024**3):
@@ -9,7 +16,13 @@ def test_parse_episode_and_quality():
     info = parse_release("The.Office.US.S02E01E02.720p.WEB-DL.DDP5.1.H.264-NTb.mkv")
     assert info.title == "the office us"
     assert info.season == 2 and info.episodes == [1, 2]
-    assert (info.resolution, info.source, info.codec, info.audio, info.group) == (720, "WEB-DL", "H264", "EAC3", "ntb")
+    assert (info.resolution, info.source, info.codec, info.audio, info.group) == (
+        720,
+        "WEB-DL",
+        "H264",
+        "EAC3",
+        "ntb",
+    )
     assert not info.browser_friendly
 
 
@@ -65,14 +78,42 @@ def test_subtitle_release_matching_prefers_same_group_and_source():
 
 def test_picks_recommend_real_release_over_popular_cam():
     from streamfinder.torrents.providers import RawTorrent
-    from streamfinder.torrents.search import SearchQuery, TorrentSearcher, choose_picks, notice_for
+    from streamfinder.torrents.search import (
+        SearchQuery,
+        TorrentSearcher,
+        choose_picks,
+        notice_for,
+    )
 
     query = SearchQuery(title="Oppenheimer", titles=["Oppenheimer"], year=2023)
     raw = [
-        RawTorrent("Oppenheimer.2023.HDCAM.x264", "a" * 40, 1_500_000_000, 2000, 50, "TPB"),
-        RawTorrent("Oppenheimer.2023.1080p.WEBRip.x264.AAC", "b" * 40, 2_800_000_000, 40, 5, "TPB"),
-        RawTorrent("Oppenheimer.2023.2160p.BluRay.x265", "c" * 40, 20_000_000_000, 25, 5, "Knaben"),
-        RawTorrent("Oppenheimer.2023.720p.WEBRip.x264.AAC", "d" * 40, 1_100_000_000, 30, 5, "YTS"),
+        RawTorrent(
+            "Oppenheimer.2023.HDCAM.x264", "a" * 40, 1_500_000_000, 2000, 50, "TPB"
+        ),
+        RawTorrent(
+            "Oppenheimer.2023.1080p.WEBRip.x264.AAC",
+            "b" * 40,
+            2_800_000_000,
+            40,
+            5,
+            "TPB",
+        ),
+        RawTorrent(
+            "Oppenheimer.2023.2160p.BluRay.x265",
+            "c" * 40,
+            20_000_000_000,
+            25,
+            5,
+            "Knaben",
+        ),
+        RawTorrent(
+            "Oppenheimer.2023.720p.WEBRip.x264.AAC",
+            "d" * 40,
+            1_100_000_000,
+            30,
+            5,
+            "YTS",
+        ),
     ]
     ranked = TorrentSearcher._rank(raw, query)
     picks = choose_picks(ranked)
@@ -89,25 +130,57 @@ def test_quality_preference_changes_recommendation():
     from streamfinder.torrents.search import SearchQuery, TorrentSearcher, choose_picks
 
     raw = [
-        RawTorrent("Dune.2021.1080p.WEBRip.x264.AAC", "a" * 40, 2_800_000_000, 400, 10, "YTS"),
-        RawTorrent("Dune.2021.2160p.WEB-DL.DDP5.1.HEVC-X", "b" * 40, 15_000_000_000, 60, 5, "TPB"),
-        RawTorrent("Dune.2021.720p.WEBRip.x264.AAC", "c" * 40, 1_100_000_000, 90, 5, "YTS"),
+        RawTorrent(
+            "Dune.2021.1080p.WEBRip.x264.AAC", "a" * 40, 2_800_000_000, 400, 10, "YTS"
+        ),
+        RawTorrent(
+            "Dune.2021.2160p.WEB-DL.DDP5.1.HEVC-X",
+            "b" * 40,
+            15_000_000_000,
+            60,
+            5,
+            "TPB",
+        ),
+        RawTorrent(
+            "Dune.2021.720p.WEBRip.x264.AAC", "c" * 40, 1_100_000_000, 90, 5, "YTS"
+        ),
     ]
     for quality, expected in [(None, "a"), (1080, "a"), (2160, "b"), (720, "c")]:
         query = SearchQuery(title="Dune", titles=["Dune"], year=2021, quality=quality)
-        assert choose_picks(TorrentSearcher._rank(raw, query), quality)["recommended"] == expected * 40, quality
+        assert (
+            choose_picks(TorrentSearcher._rank(raw, query), quality)["recommended"]
+            == expected * 40
+        ), quality
 
 
 def test_huge_files_are_never_the_default_pick():
     from streamfinder.torrents.providers import RawTorrent
     from streamfinder.torrents.search import SearchQuery, TorrentSearcher, choose_picks
 
-    query = SearchQuery(title="Show", titles=["Show"], media_type="tv", season=1, episode=3,
-                        runtime=50, season_episodes={1: 10})
+    query = SearchQuery(
+        title="Show",
+        titles=["Show"],
+        media_type="tv",
+        season=1,
+        episode=3,
+        runtime=50,
+        season_episodes={1: 10},
+    )
     raw = [
-        RawTorrent("Show.S01E03.2160p.WEB-DL.H264.AAC-X", "a" * 40, 50 * 1024**3, 900, 10, "TPB"),  # 50 GB episode
-        RawTorrent("Show.S01.1080p.WEB-DL.H264.AAC-X", "b" * 40, 25 * 1024**3, 300, 10, "TPB"),  # 2.5 GB/episode pack
-        RawTorrent("Show.S01E03.1080p.WEB-DL.H264.AAC-X", "c" * 40, 2 * 1024**3, 40, 5, "TPB"),
+        RawTorrent(
+            "Show.S01E03.2160p.WEB-DL.H264.AAC-X",
+            "a" * 40,
+            50 * 1024**3,
+            900,
+            10,
+            "TPB",
+        ),  # 50 GB episode
+        RawTorrent(
+            "Show.S01.1080p.WEB-DL.H264.AAC-X", "b" * 40, 25 * 1024**3, 300, 10, "TPB"
+        ),  # 2.5 GB/episode pack
+        RawTorrent(
+            "Show.S01E03.1080p.WEB-DL.H264.AAC-X", "c" * 40, 2 * 1024**3, 40, 5, "TPB"
+        ),
     ]
     ranked = TorrentSearcher._rank(raw, query)
     by_hash = {r.raw.info_hash: r for r in ranked}

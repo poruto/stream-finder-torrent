@@ -10,6 +10,7 @@ from .subtitles import SubtitleService
 from .tmdb import TMDBClient, tmdb_client
 from .torrents import TorrentSearcher
 from .torrserver import TorrServerClient
+from .transcode import Transcoder
 
 
 @dataclass
@@ -19,6 +20,7 @@ class Services:
     torrents: TorrentSearcher
     subtitles: SubtitleService
     imdb: IMDbRatings
+    transcoder: Transcoder
 
     @classmethod
     def create(cls) -> "Services":
@@ -31,6 +33,7 @@ class Services:
             torrents=TorrentSearcher(),
             subtitles=SubtitleService(torrserver),
             imdb=IMDbRatings(config.IMDB_DB_PATH),
+            transcoder=Transcoder(),
         )
 
 

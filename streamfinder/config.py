@@ -62,7 +62,13 @@ SUBTITLE_CACHE_DIR = os.getenv(
     "SUBTITLE_CACHE_DIR", os.path.join(BASE_DIR, "cache", "subtitles")
 )
 
-IMDB_DB_PATH = os.getenv("IMDB_DB_PATH", os.path.join(BASE_DIR, "cache", "imdb_ratings.sqlite"))
+IMDB_DB_PATH = os.getenv(
+    "IMDB_DB_PATH", os.path.join(BASE_DIR, "cache", "imdb_ratings.sqlite")
+)
+
+# ffmpeg converts unsupported audio (AC3/DTS...) to AAC; found on PATH when empty
+FFMPEG_PATH = os.getenv("FFMPEG_PATH", "").strip()
+FFPROBE_PATH = os.getenv("FFPROBE_PATH", "").strip()
 
 # Flask
 DEBUG = _env_bool("FLASK_DEBUG", False)

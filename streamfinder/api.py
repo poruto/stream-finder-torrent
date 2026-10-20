@@ -1,16 +1,18 @@
 """JSON API used by the frontend."""
 
+import json
 import logging
 import re
 import time
 from typing import Any
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
 
 from . import config
 from .i18n import t
 from .services import services
+from .subtitles.sync import align
 from .tmdb import match_titles
 from .torrents import SearchQuery
 from .torrserver import (
@@ -38,7 +40,7 @@ def _body() -> dict[str, Any]:
     if not isinstance(data, dict):
         abort(
             Response(
-                '{"success": false, "error": "%s"}' % t("err_json"),
+                json.dumps({"success": False, "error": t("err_json")}),
                 400,
                 mimetype="application/json",
             )
@@ -81,7 +83,11 @@ def _public_torrserver_url() -> str:
 @api.route("/browse")
 def browse():
     page = max(1, min(_int(request.args.get("page")) or 1, 500))
-    return jsonify(browse_page(_media_type(request.args.get("type")), browse_filters(request.args), page))
+    return jsonify(
+        browse_page(
+            _media_type(request.args.get("type")), browse_filters(request.args), page
+        )
+    )
 
 
 @api.route("/search")
@@ -203,6 +209,84 @@ def play():
     )
 
 
+def _torrent_file(info_hash: str, index: int):
+    """The TorrentFile for a stream, or 404."""
+    if not _HASH_RE.fullmatch(info_hash):
+        abort(404)
+    try:
+        files = services().torrserver.files(info_hash, wait=10)
+    except TorrServerError:
+        abort(502)
+    file = next((f for f in files if f.index == index and f.is_video), None)
+    if file is None:
+        abort(404)
+    return file
+
+
+@api.route("/probe/<info_hash>/<int:index>")
+def probe(info_hash: str, index: int):
+    """Codecs of a playing file, so the player knows whether audio needs converting."""
+    svc = services()
+    if not svc.transcoder.available:
+        return jsonify(success=True, available=False)
+    file = _torrent_file(info_hash, index)
+    try:
+        result = svc.transcoder.probe(svc.torrserver.stream_url(info_hash, file))
+    except Exception as e:  # ffprobe timeout / unreadable stream
+        logger.info("probe failed for %s: %s", file.name, e)
+        return jsonify(success=True, available=True, probed=False)
+    return jsonify(success=True, available=True, probed=True, **result.to_dict())
+
+
+@api.route("/keyframe/<info_hash>/<int:index>")
+def keyframe(info_hash: str, index: int):
+    """Exact start time of a converted stream that is asked to begin at ?t=."""
+    svc = services()
+    if not svc.transcoder.available:
+        abort(404)
+    file = _torrent_file(info_hash, index)
+    position = max(0.0, request.args.get("t", 0, type=float))
+    try:
+        start = svc.transcoder.keyframe_at(
+            svc.torrserver.stream_url(info_hash, file), position
+        )
+    except Exception as e:  # timeout: fall back to the requested time
+        logger.info("keyframe lookup failed: %s", e)
+        start = position
+    return jsonify(success=True, start=start)
+
+
+@api.route("/transcode/<info_hash>/<int:index>.mp4")
+def transcode(info_hash: str, index: int):
+    """Video copied as-is, audio converted to AAC, streamed as fragmented MP4.
+
+    Query: start (seconds), audio (track number), copy=1 to only remux (Matroska -> MP4).
+    """
+    svc = services()
+    if not svc.transcoder.available:
+        abort(404)
+    file = _torrent_file(info_hash, index)
+    url = svc.torrserver.stream_url(info_hash, file)
+    start = max(0.0, request.args.get("start", 0, type=float))
+    track = max(0, request.args.get("audio", 0, type=int))
+    try:
+        video_codec = svc.transcoder.probe(url).video_codec
+    except Exception:
+        video_codec = None
+    chunks = svc.transcoder.stream(
+        url,
+        start,
+        track,
+        copy_audio=request.args.get("copy") == "1",
+        video_codec=video_codec,
+    )
+    return Response(
+        stream_with_context(chunks),
+        mimetype="video/mp4",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @api.route("/torrent-stats/<info_hash>")
 def torrent_stats(info_hash: str):
     if not _HASH_RE.fullmatch(info_hash):
@@ -261,6 +345,39 @@ def find_subtitles():
     except TorrServerError as e:
         return _torrserver_error(e)
     return jsonify(success=True, **result)
+
+
+@api.route("/subtitles/sync", methods=["POST"])
+def sync_subtitles():
+    """Align a subtitle to the speech around `position`.
+
+    Body: {hash, file_index, subtitle (candidate id), position}
+    Returns {offset, scale, confidence, applied}: cue times become t * scale + offset.
+    """
+    body = _body()
+    svc = services()
+    if not svc.transcoder.available:
+        return jsonify(success=False, error="ffmpeg is not installed"), 501
+    file = _torrent_file(
+        (body.get("hash") or "").lower(), _int(body.get("file_index")) or 0
+    )
+    position = max(0.0, float(body.get("position") or 0))
+    try:
+        cues = svc.subtitles.cues(str(body.get("subtitle") or ""))
+        window_start = max(0.0, position - 30)
+        speech = svc.transcoder.speech(
+            svc.torrserver.stream_url((body.get("hash") or "").lower(), file),
+            window_start,
+        )
+    except ValueError as e:
+        return jsonify(success=False, error=str(e)), 404
+    except Exception as e:  # ffmpeg timeout, download failure
+        logger.info("subtitle sync failed: %s", e)
+        return jsonify(success=False, error=str(e)), 502
+    if not speech:
+        return jsonify(success=False, error="no speech found"), 422
+    result = align(cues, speech, (window_start, window_start + 120))
+    return jsonify(success=True, **result.to_dict())
 
 
 @api.route("/subtitles/<candidate_id>.vtt")

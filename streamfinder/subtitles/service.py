@@ -37,6 +37,7 @@ from .formats import (
     decode_subtitle,
     language_from_filename,
     opensubtitles_hash,
+    parse_cues,
     to_webvtt,
 )
 from .opensubtitles import OpenSubtitlesClient
@@ -378,6 +379,13 @@ class SubtitleService:
         return list(merged.values())
 
     # -- fetch ------------------------------------------------------------------
+
+    def cues(self, candidate_id: str) -> list[tuple[float, float]]:
+        """(start, end) in seconds of every cue of a subtitle."""
+        return [
+            (start / 1000, end / 1000)
+            for start, end, _ in parse_cues(self.get_vtt(candidate_id))
+        ]
 
     def get_vtt(self, candidate_id: str) -> str:
         """Return the subtitle as WebVTT, downloading and caching it on first use."""

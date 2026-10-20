@@ -7,6 +7,7 @@
 * Torrents-CSV DHT-crawled index with live seeder counts
 """
 
+import contextlib
 import logging
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -175,10 +176,10 @@ class EZTVProvider(Provider):
                     for page in range(2, pages + 1)
                 ]
                 for future in futures:
-                    try:
+                    with contextlib.suppress(
+                        ConnectionError
+                    ):  # a missing page is not fatal
                         items.extend(future.result().get("torrents") or [])
-                    except ConnectionError:
-                        pass
 
         results = []
         for item in items:

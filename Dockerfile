@@ -5,6 +5,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# ffmpeg converts AC3/DTS audio (which browsers can't play) to AAC and matches subtitles to speech.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get clean && rm -r /var/lib/apt/lists
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt

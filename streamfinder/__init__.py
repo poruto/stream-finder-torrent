@@ -31,8 +31,13 @@ def create_app() -> Flask:
     app.register_blueprint(api)
 
     # Globals (not a context processor) so that imported macros can translate too.
-    app.jinja_env.globals.update(t=i18n.t, plural=i18n.plural, js_strings=i18n.js_strings,
-                                 ui_languages=i18n.LANGUAGES, subtitle_defaults=config.SUBTITLE_LANGUAGES)
+    app.jinja_env.globals.update(
+        t=i18n.t,
+        plural=i18n.plural,
+        js_strings=i18n.js_strings,
+        ui_languages=i18n.LANGUAGES,
+        subtitle_defaults=config.SUBTITLE_LANGUAGES,
+    )
 
     @app.context_processor
     def inject_language():

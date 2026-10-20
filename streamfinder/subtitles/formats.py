@@ -157,7 +157,7 @@ def parse_cues(text: str, fps: float | None = None) -> list[tuple]:
                 fmt = [f.strip().lower() for f in line[7:].split(",")]
             elif line.startswith("Dialogue:") and fmt:
                 values = line[9:].split(",", len(fmt) - 1)
-                row = dict(zip(fmt, (v.strip() for v in values)))
+                row = dict(zip(fmt, (v.strip() for v in values), strict=False))
                 try:
                     h1, m1, s1 = row["start"].split(":")
                     h2, m2, s2 = row["end"].split(":")
