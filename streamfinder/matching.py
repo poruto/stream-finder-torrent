@@ -131,7 +131,10 @@ _STOP_TOKENS = (
     set(_RESOLUTIONS)
     | _CAM_TOKENS
     | _EDITIONS
+    | _CZ_TOKENS  # "Avatar 3D CZ Extended Edition", "Pelisky CZ dabing"
+    | _SK_TOKENS
     | {
+        "3d",
         "bluray",
         "bdrip",
         "brrip",

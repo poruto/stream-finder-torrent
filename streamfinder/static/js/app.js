@@ -170,12 +170,19 @@
     autoSwitch: true,
     autoNext: true,
     alwaysConvert: false,
+    // "cs": Czech/Slovak dubbed versions and audio tracks first, "any": no language preference
+    versionLang: DEFAULTS.lang === "cs" ? "cs" : "any",
+    // No subtitles in my language: "translate" others, "ai" from the audio, "other" language as is
+    subsMissing: "translate",
+    translator: "google", // or "ai" (needs the AI subtitles key)
+    aiTarget: "en", // AI subtitles: translate into this language ("" = as spoken)
     volume: 1,
     muted: false,
   };
   SF.settings = {
     get: () => ({ ...DEFAULT_SETTINGS, ...settingsStore.read() }),
     set: (changes) => settingsStore.write({ ...SF.settings.get(), ...changes }),
+    czech: () => SF.settings.get().versionLang === "cs",
     quality: () =>
       SF.settings.get().quality === "auto"
         ? null
@@ -195,22 +202,33 @@
       `input[name="quality"][value="${current.quality}"]`,
     );
     if (quality) quality.checked = true;
+    const versionLang = settingsForm.querySelector(
+      `input[name="versionLang"][value="${current.versionLang}"]`,
+    );
+    if (versionLang) versionLang.checked = true;
     settingsForm.primary.value = current.primary;
     settingsForm.fallback.value = current.fallback;
     settingsForm.auto.checked = current.auto;
     settingsForm.autoSwitch.checked = current.autoSwitch;
     settingsForm.autoNext.checked = current.autoNext;
     settingsForm.alwaysConvert.checked = current.alwaysConvert;
+    settingsForm.subsMissing.value = current.subsMissing;
+    settingsForm.translator.value = current.translator;
+    if (settingsForm.aiTarget) settingsForm.aiTarget.value = current.aiTarget;
     const saved = document.getElementById("settings-saved");
     settingsForm.addEventListener("change", () => {
       SF.settings.set({
         quality: settingsForm.quality.value,
+        versionLang: settingsForm.versionLang.value,
         primary: settingsForm.primary.value,
         fallback: settingsForm.fallback.value,
         auto: settingsForm.auto.checked,
         autoSwitch: settingsForm.autoSwitch.checked,
         autoNext: settingsForm.autoNext.checked,
         alwaysConvert: settingsForm.alwaysConvert.checked,
+        subsMissing: settingsForm.subsMissing.value || "translate",
+        translator: settingsForm.translator.value || "google",
+        ...(settingsForm.aiTarget ? { aiTarget: settingsForm.aiTarget.value } : {}),
       });
       saved.textContent = t("saved");
     });
@@ -226,10 +244,49 @@
         badge.textContent = ok ? t("key_set") : t("key_missing");
         badge.dataset.ok = String(ok);
       }
-      const remove = keysSection.querySelector("[data-remove]");
-      if (remove) remove.hidden = !state.opensubtitles;
+      for (const remove of keysSection.querySelectorAll("[data-remove]")) {
+        remove.hidden = !state[remove.dataset.remove];
+      }
+      // AI subtitles: which source is in use, and the local server's address.
+      const ai = keysSection.querySelector('[data-field="transcribe"]');
+      if (ai) {
+        const radio = ai.querySelector(
+          `input[name="transcribe_provider"][value="${state.transcribe_provider || "local"}"]`,
+        );
+        if (radio) radio.checked = true;
+        ai.querySelector('input[name="transcribe_api_url"]').value =
+          state.transcribe_local || "";
+        ai.querySelector('input[name="transcribe_enabled"]').checked = Boolean(
+          state.transcribe_enabled,
+        );
+        const quality = ai.querySelector('select[name="whisper_quality"]');
+        if (quality && state.whisper_quality)
+          quality.value = state.whisper_quality;
+        const note = ai.querySelector(".whisper-state");
+        if (note) {
+          note.textContent =
+            state.whisper_state === "downloading"
+              ? t("whisper_downloading")
+              : String(state.whisper_state || "").startsWith("error")
+                ? t("whisper_failed", { error: state.whisper_state.slice(7) })
+                : state.whisper_local === false
+                  ? t("whisper_host_only")
+                  : "";
+          // A new model is downloading: check again in a few seconds.
+          if (state.whisper_state === "downloading")
+            setTimeout(
+              () =>
+                SF.api("/api/keys")
+                  .then(renderState)
+                  .catch(() => {}),
+              4000,
+            );
+        }
+      }
     };
-    SF.api("/api/keys").then(renderState).catch(() => {});
+    SF.api("/api/keys")
+      .then(renderState)
+      .catch(() => {});
 
     const submit = async (form, body) => {
       const message = form.querySelector(".key-message");
@@ -243,7 +300,10 @@
         form.reset();
         message.className = "key-message ok";
         message.textContent = t("key_saved");
-        if (form.dataset.field === "tmdb" && new URLSearchParams(location.search).get("setup")) {
+        if (
+          form.dataset.field === "tmdb" &&
+          new URLSearchParams(location.search).get("setup")
+        ) {
           setTimeout(() => (location.href = "/"), 900);
         }
       } catch (error) {
@@ -254,18 +314,41 @@
       }
     };
 
+    // Picking a Whisper quality applies right away (the model downloads in the background).
+    keysSection
+      .querySelector('select[name="whisper_quality"]')
+      ?.addEventListener("change", (event) =>
+        event.target.form.requestSubmit(),
+      );
+
     for (const form of keysSection.querySelectorAll(".key-form")) {
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        const body = Object.fromEntries([...new FormData(form)].filter(([, v]) => String(v).trim()));
+        const body = Object.fromEntries(
+          [...new FormData(form)].filter(([, v]) => String(v).trim()),
+        );
+        // The local address is shown pre-filled: only send it when it was changed.
+        const url = form.querySelector('input[name="transcribe_api_url"]');
+        if (
+          url &&
+          url.value === url.defaultValue &&
+          body.transcribe_provider !== "local"
+        )
+          delete body.transcribe_api_url;
+        const enabled = form.querySelector('input[name="transcribe_enabled"]');
+        if (enabled) body.transcribe_enabled = enabled.checked ? "1" : "0";
         if (!Object.keys(body).length) return;
         submit(form, body);
       });
     }
-    keysSection.querySelector("[data-remove]")?.addEventListener("click", (event) => {
-      const form = event.target.closest(".key-form");
-      if (confirm(t("key_remove_confirm"))) submit(form, { remove: ["opensubtitles"] });
-    });
+    for (const button of keysSection.querySelectorAll("[data-remove]")) {
+      button.addEventListener("click", (event) => {
+        const form = event.target.closest(".key-form");
+        const what = button.dataset.remove;
+        if (confirm(t(`key_remove_confirm_${what}`)))
+          submit(form, { remove: [what] });
+      });
+    }
   }
 
   // ---------------------------------------------------------- admin login (Settings page)
@@ -279,21 +362,27 @@
     event.preventDefault();
     formMessage(loginForm, t("loading"));
     try {
-      await SF.api("/api/admin/login", Object.fromEntries(new FormData(loginForm)));
+      await SF.api(
+        "/api/admin/login",
+        Object.fromEntries(new FormData(loginForm)),
+      );
       location.reload();
     } catch (error) {
       formMessage(loginForm, error.message, "bad");
     }
   });
-  document.getElementById("admin-logout")?.addEventListener("click", async () => {
-    await SF.api("/api/admin/logout", {}).catch(() => {});
-    location.reload();
-  });
+  document
+    .getElementById("admin-logout")
+    ?.addEventListener("click", async () => {
+      await SF.api("/api/admin/logout", {}).catch(() => {});
+      location.reload();
+    });
   const credentialsForm = document.getElementById("admin-credentials");
   credentialsForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(credentialsForm));
-    if (data.new_password !== data.repeat) return formMessage(credentialsForm, t("password_mismatch"), "bad");
+    if (data.new_password !== data.repeat)
+      return formMessage(credentialsForm, t("password_mismatch"), "bad");
     try {
       await SF.api("/api/admin/credentials", data);
       formMessage(credentialsForm, t("password_changed"), "ok");

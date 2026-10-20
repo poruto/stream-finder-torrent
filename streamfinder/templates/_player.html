@@ -39,6 +39,9 @@
       <button class="ctl ctl-text" id="episodes-btn" type="button" hidden aria-haspopup="true" aria-expanded="false">
         <svg class="icon"><use href="#i-list"/></svg><span>{{ t('episodes') }}</span>
       </button>
+      <button class="ctl ctl-text" id="audio-btn" type="button" hidden aria-haspopup="true" aria-expanded="false">
+        <svg class="icon"><use href="#i-audio"/></svg><span id="audio-label">{{ t('audio_track') }}</span>
+      </button>
       <button class="ctl ctl-text" id="subs-btn" type="button" aria-haspopup="true" aria-expanded="false" disabled>
         <svg class="icon"><use href="#i-cc"/></svg><span id="subs-label">{{ t('subtitles') }}</span>
       </button>
@@ -55,6 +58,7 @@
   </div>
 
   <div class="player-menu subs-menu" id="subs-menu" hidden>
+    <div class="menu-head"><strong>{{ t('subtitles') }}</strong><button class="icon-btn menu-close" type="button" data-close-menu aria-label="{{ t('close') }}"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="subs-options" id="subs-options"></div>
     <button class="tool-btn subs-autosync" id="subs-autosync" type="button">{{ t('sync_by_audio') }}</button>
     <div class="subs-sync">
@@ -64,6 +68,11 @@
       <button class="tool-btn" type="button" data-sync="0.5" aria-label="{{ t('sync_later') }}">+0,5 s</button>
     </div>
     <p class="muted subs-help">{{ t('sync_help') }}</p>
+  </div>
+
+  <div class="player-menu audio-menu" id="audio-menu" hidden>
+    <div class="menu-head"><strong>{{ t('audio_menu') }}</strong><button class="icon-btn menu-close" type="button" data-close-menu aria-label="{{ t('close') }}"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="subs-options" id="audio-options" role="menu"></div>
   </div>
 
   <div class="player-menu episodes-menu" id="episodes-menu" hidden>

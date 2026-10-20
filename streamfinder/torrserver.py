@@ -1,7 +1,7 @@
 """TorrServer (MatriX) API client.
 
 Endpoints used (all verified against TorrServer MatriX.136):
-  POST /torrents {"action": "add" | "get" | "list" | "rem", ...}
+  POST /torrents {"action": "add" | "get" | "list" | "drop" | "rem", ...}
   GET  /stream/<name>?link=<hash>&index=<file id>&play   (supports HTTP Range)
   GET  /echo
 """
@@ -192,6 +192,10 @@ class TorrServerClient:
         if not info_hash:
             raise TorrServerError("TorrServer returned no info hash")
         return info_hash.lower()
+
+    def drop(self, info_hash: str) -> None:
+        """Stop downloading a torrent now (it stays in TorrServer's list for a quick restart)."""
+        self._post({"action": "drop", "hash": info_hash}, timeout=5)
 
     def get(self, info_hash: str) -> dict[str, Any] | None:
         """Torrent status, or None when TorrServer has unloaded it (404)."""

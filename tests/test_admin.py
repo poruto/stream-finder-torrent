@@ -14,7 +14,9 @@ def client(tmp_path, monkeypatch):
 
 
 def login(client, username="admin", password="admin"):
-    return client.post("/api/admin/login", json={"username": username, "password": password})
+    return client.post(
+        "/api/admin/login", json={"username": username, "password": password}
+    )
 
 
 def test_keys_need_admin(client):
@@ -27,7 +29,12 @@ def test_keys_need_admin(client):
 def test_change_password_replaces_default(client, tmp_path):
     login(client)
     response = client.post(
-        "/api/admin/credentials", json={"current_password": "admin", "username": "me", "new_password": "longer-pass$1"}
+        "/api/admin/credentials",
+        json={
+            "current_password": "admin",
+            "username": "me",
+            "new_password": "longer-pass$1",
+        },
     )
     assert response.status_code == 200
     stored = (tmp_path / "settings.env").read_text()
@@ -40,7 +47,10 @@ def test_change_password_replaces_default(client, tmp_path):
 def test_rejects_weak_or_default_passwords(client):
     login(client)
     for password in ("short", "admin"):
-        response = client.post("/api/admin/credentials", json={"current_password": "admin", "new_password": password})
+        response = client.post(
+            "/api/admin/credentials",
+            json={"current_password": "admin", "new_password": password},
+        )
         assert response.status_code == 400
 
 
@@ -48,11 +58,16 @@ def test_locks_out_after_repeated_failures(client, monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _: None)
     for _ in range(auth.MAX_FAILURES):
         login(client, password="wrong")
-    assert login(client).status_code == 401  # even the right password waits out the lockout
+    assert (
+        login(client).status_code == 401
+    )  # even the right password waits out the lockout
 
 
 def test_first_run_redirects_to_settings(client, monkeypatch):
     monkeypatch.setattr(config, "TMDB_API_KEY", "")
     response = client.get("/movies")
-    assert response.status_code == 302 and "/settings?setup=1" in response.headers["Location"]
+    assert (
+        response.status_code == 302
+        and "/settings?setup=1" in response.headers["Location"]
+    )
     assert client.get("/settings").status_code == 200

@@ -7,8 +7,115 @@
       <p class="setup-note">{{ t('setup_needed') }}</p>
     {% endif %}
 
-    <section class="setting keys" id="keys" aria-labelledby="keys-title">
-      <h2 class="keys-title" id="keys-title">{{ t('admin_legend') }}</h2>
+    <form class="settings" id="settings-form">
+      <fieldset class="setting">
+        <legend>{{ t('lang_legend') }}</legend>
+        <div class="setting-row">
+          <span>{{ t('ui_language') }}</span>
+          <div class="choice-row">
+            {% for code, name in ui_languages.items() %}
+              <a class="chip" href="{{ url_for('web.set_language', code=code, next=url_for('web.settings')) }}" {% if code == lang %}aria-current="true"{% endif %} lang="{{ code }}">{{ name }}</a>
+            {% endfor %}
+          </div>
+        </div>
+        <p class="muted">{{ t('version_lang_help') }}</p>
+        <div class="choice-list">
+          {% for value in ['cs', 'any'] %}
+            <label class="choice">
+              <input type="radio" name="versionLang" value="{{ value }}">
+              <span><strong>{{ t('version_lang_' ~ value) }}</strong><small>{{ t('version_lang_' ~ value ~ '_text') }}</small></span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>{{ t('quality_legend') }}</legend>
+        <p class="muted">{{ t('quality_help') }}</p>
+        <div class="choice-list">
+          {% for value in ['auto', '1080', '2160', '720'] %}
+            <label class="choice">
+              <input type="radio" name="quality" value="{{ value }}">
+              <span><strong>{{ t('quality_' ~ value) }}</strong><small>{{ t('quality_' ~ value ~ '_text') }}</small></span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>{{ t('subtitles_legend') }}</legend>
+        <label class="toggle">
+          <input type="checkbox" name="auto" checked>
+          <span>{{ t('auto_subs') }}</span>
+        </label>
+        <div class="setting-row">
+          <label for="sub-primary">{{ t('sub_primary') }}</label>
+          <select id="sub-primary" name="primary">
+            {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="sub-fallback">{{ t('sub_fallback') }}</label>
+          <select id="sub-fallback" name="fallback">
+            <option value="">{{ t('none') }}</option>
+            {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="sub-missing">{{ t('subs_missing') }}</label>
+          <select id="sub-missing" name="subsMissing">
+            {% for value in ['translate', 'ai', 'other'] if value != 'ai' or ai_available %}<option value="{{ value }}">{{ t('subs_missing_' ~ value) }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="sub-translator">{{ t('translator') }}</label>
+          <select id="sub-translator" name="translator">
+            {% for value in ['google', 'ai'] if value != 'ai' or ai_translate %}<option value="{{ value }}">{{ t('translator_' ~ value) }}</option>{% endfor %}
+          </select>
+        </div>
+        <p class="muted">{{ t('translator_help') }}</p>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>{{ t('ai_legend') }}</legend>
+        {% if ai_available %}
+          <p class="muted">{{ t('ai_target_help') }}</p>
+          <div class="setting-row">
+            <label for="ai-target">{{ t('ai_target') }}</label>
+            <select id="ai-target" name="aiTarget">
+              <option value="">{{ t('ai_target_none') }}</option>
+              {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+            </select>
+          </div>
+        {% else %}
+          <p class="muted">{{ t('ai_off_note') }}</p>
+        {% endif %}
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>{{ t('playback_legend') }}</legend>
+        <label class="toggle">
+          <input type="checkbox" name="autoSwitch" checked>
+          <span>{{ t('auto_switch') }}</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" name="autoNext" checked>
+          <span>{{ t('auto_next') }}</span>
+        </label>
+        <details class="setting-advanced">
+          <summary>{{ t('advanced_settings') }}</summary>
+          <label class="toggle">
+            <input type="checkbox" name="alwaysConvert">
+            <span>{{ t('always_convert') }}<small class="muted">{{ t('always_convert_help') }}</small></span>
+          </label>
+        </details>
+      </fieldset>
+      <p class="muted" id="settings-saved" aria-live="polite">{{ t('settings_local') }}</p>
+    </form>
+
+    <details class="admin-panel" id="admin-panel" {% if is_admin or setup %}open{% endif %}>
+      <summary><strong>{{ t('admin_legend') }}</strong><small class="muted">{{ t('admin_panel_help') }}</small></summary>
+    <section class="setting keys" id="keys" aria-label="{{ t('admin_legend') }}">
       {% if not is_admin %}
         <p class="muted">{{ t('admin_login_help') }}</p>
         <form class="key-form" id="admin-login">
@@ -63,6 +170,64 @@
         <p class="key-message" aria-live="polite"></p>
       </form>
 
+      <form class="key-form" data-field="sktorrent">
+        <div class="key-head">
+          <strong>SkTorrent</strong>
+          <span class="key-state" data-key="sktorrent"></span>
+        </div>
+        <p class="muted">{{ t('key_sk_help', link='<a href="https://sktorrent.eu" target="_blank" rel="noopener">sktorrent.eu</a>') | safe }}</p>
+        <div class="key-row">
+          <label class="sr-only" for="key-sk-user">{{ t('key_username') }}</label>
+          <input id="key-sk-user" name="sktorrent_username" type="text" autocomplete="off" placeholder="{{ t('key_username') }}">
+          <label class="sr-only" for="key-sk-pass">{{ t('key_password') }}</label>
+          <input id="key-sk-pass" name="sktorrent_password" type="password" autocomplete="new-password" placeholder="{{ t('key_password') }}">
+          <button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button>
+        </div>
+        <button class="key-remove" type="button" data-remove="sktorrent" hidden>{{ t('key_remove_sk') }}</button>
+        <p class="key-message" aria-live="polite"></p>
+      </form>
+
+      <form class="key-form" data-field="transcribe">
+        <div class="key-head">
+          <strong>{{ t('key_ai_title') }}</strong>
+          <span class="key-state" data-key="transcribe"></span>
+        </div>
+        <p class="muted">{{ t('key_ai_help') }}</p>
+        <label class="toggle ai-enable">
+          <input type="checkbox" name="transcribe_enabled" value="1">
+          <span>{{ t('ai_enable') }}<small class="muted">{{ t('ai_enable_help') }}</small></span>
+        </label>
+        <div class="choice-list ai-source">
+          <label class="choice">
+            <input type="radio" name="transcribe_provider" value="local">
+            <span><strong>{{ t('ai_source_local') }}</strong><small>{{ t('ai_source_local_text') }}</small></span>
+          </label>
+          <div class="key-row ai-local">
+            <label class="sr-only" for="key-ai-url">{{ t('key_ai_url') }}</label>
+            <input id="key-ai-url" name="transcribe_api_url" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:8178/v1">
+          </div>
+          <div class="setting-row ai-local">
+            <label for="whisper-quality">{{ t('whisper_quality') }}</label>
+            <select id="whisper-quality" name="whisper_quality">
+              {% for value in ['fast', 'balanced', 'best'] %}<option value="{{ value }}">{{ t('whisper_quality_' ~ value) }}</option>{% endfor %}
+            </select>
+          </div>
+          <p class="muted whisper-state" aria-live="polite"></p>
+          <label class="choice">
+            <input type="radio" name="transcribe_provider" value="api">
+            <span><strong>{{ t('ai_source_api') }}</strong><small>{{ t('ai_source_api_text', link='<a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a>') | safe }}</small></span>
+          </label>
+          <div class="key-row">
+            <label class="sr-only" for="key-ai">Groq / OpenAI API key</label>
+            <input id="key-ai" name="transcribe_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="{{ t('key_placeholder') }}">
+            <span class="key-state" data-key="transcribe_key"></span>
+          </div>
+        </div>
+        <div class="key-row"><button class="btn btn-ghost" type="submit">{{ t('key_save') }}</button></div>
+        <button class="key-remove" type="button" data-remove="transcribe" hidden>{{ t('key_remove_ai') }}</button>
+        <p class="key-message" aria-live="polite"></p>
+      </form>
+
         <form class="key-form" id="admin-credentials">
           <div class="key-head"><strong>{{ t('admin_account') }}</strong></div>
           <div class="key-row">
@@ -83,67 +248,6 @@
         <button class="key-remove" type="button" id="admin-logout">{{ t('admin_logout') }}</button>
       {% endif %}
     </section>
-
-    <form class="settings" id="settings-form">
-      <fieldset class="setting">
-        <legend>{{ t('ui_language') }}</legend>
-        <div class="choice-row">
-          {% for code, name in ui_languages.items() %}
-            <a class="chip" href="{{ url_for('web.set_language', code=code, next=url_for('web.settings')) }}" {% if code == lang %}aria-current="true"{% endif %} lang="{{ code }}">{{ name }}</a>
-          {% endfor %}
-        </div>
-      </fieldset>
-
-      <fieldset class="setting">
-        <legend>{{ t('quality_legend') }}</legend>
-        <p class="muted">{{ t('quality_help') }}</p>
-        <div class="choice-list">
-          {% for value in ['auto', '1080', '2160', '720'] %}
-            <label class="choice">
-              <input type="radio" name="quality" value="{{ value }}">
-              <span><strong>{{ t('quality_' ~ value) }}</strong><small>{{ t('quality_' ~ value ~ '_text') }}</small></span>
-            </label>
-          {% endfor %}
-        </div>
-      </fieldset>
-
-      <fieldset class="setting">
-        <legend>{{ t('playback_legend') }}</legend>
-        <label class="toggle">
-          <input type="checkbox" name="autoSwitch" checked>
-          <span>{{ t('auto_switch') }}</span>
-        </label>
-        <label class="toggle">
-          <input type="checkbox" name="autoNext" checked>
-          <span>{{ t('auto_next') }}</span>
-        </label>
-        <label class="toggle">
-          <input type="checkbox" name="alwaysConvert">
-          <span>{{ t('always_convert') }}<small class="muted">{{ t('always_convert_help') }}</small></span>
-        </label>
-      </fieldset>
-
-      <fieldset class="setting">
-        <legend>{{ t('subtitles_legend') }}</legend>
-        <div class="setting-row">
-          <label for="sub-primary">{{ t('sub_primary') }}</label>
-          <select id="sub-primary" name="primary">
-            {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label for="sub-fallback">{{ t('sub_fallback') }}</label>
-          <select id="sub-fallback" name="fallback">
-            <option value="">{{ t('none') }}</option>
-            {% for code, name in all_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
-          </select>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" name="auto" checked>
-          <span>{{ t('auto_subs') }}</span>
-        </label>
-      </fieldset>
-      <p class="muted" id="settings-saved" aria-live="polite"></p>
-    </form>
+    </details>
   </div>
 {% endblock %}

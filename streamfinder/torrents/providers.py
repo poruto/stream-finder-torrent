@@ -37,6 +37,7 @@ class RawTorrent:
     provider: str
     magnet: str = ""
     id_match: bool = False  # found by exact IMDb id
+    title: str = ""  # name to show when `name` was rewritten for the parser
 
 
 class Provider:

@@ -14,6 +14,11 @@ DIR="$HOME/stream-finder-torrent"
 TS_TAG="${TORRSERVER_TAG:-MatriX.147}"
 SV="$PREFIX/var/service"
 
+# --refresh (used by `streamfinder update`): only rewrite the services and the command.
+REFRESH=0
+[ "${1:-}" = "--refresh" ] && REFRESH=1
+
+if [ "$REFRESH" = 0 ]; then
 echo "==> Installing packages"
 # --force-confnew: never stop and ask about changed config files (stdin is the curl pipe).
 APT_OPTS=(-y -o Dpkg::Options::=--force-confnew)
@@ -60,14 +65,13 @@ mv -f bin/torrserver.new bin/torrserver
 
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "API keys can also be entered later on the web: Settings (login admin / admin)."
-  read -r -p "TMDB API key (Enter = later on the web): " tmdb_key </dev/tty || tmdb_key=""
-  read -r -p "OpenSubtitles API key (optional, Enter to skip): " os_key </dev/tty || os_key=""
-  sed -i "s|^TMDB_API_KEY=.*|TMDB_API_KEY=${tmdb_key}|" .env
-  sed -i "s|^OPENSUBTITLES_API_KEY=.*|OPENSUBTITLES_API_KEY=${os_key}|" .env
   sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')|" .env
   sed -i "s|^HOST=.*|HOST=0.0.0.0|" .env
 fi
+echo "Keys and logins can also be entered later on the web: Settings (login admin / admin)."
+bash setup-keys.sh .env || true  # asks only for what is still missing
+fi  # end of the full install
+cd "$DIR"
 
 echo "==> Installing services"
 # runit service: `run` must stay in the foreground; runit restarts it whenever it exits.
@@ -90,23 +94,33 @@ add_service streamfinder "gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 -
 add_service streamfinder-updater "sh -c 'sleep 60; while true; do $PREFIX/bin/streamfinder auto-update; sleep 1800; done'"
 
 echo "==> Installing the streamfinder command"
-cat > "$PREFIX/bin/streamfinder" <<'SCRIPT'
+# Written next to it and moved into place: `streamfinder update` runs this while the old one is running.
+cat > "$PREFIX/bin/streamfinder.new" <<'SCRIPT'
 #!/data/data/com.termux/files/usr/bin/bash
 # streamfinder start | stop | restart | status | update | auto-update | logs
 set -uo pipefail
 DIR="$HOME/stream-finder-torrent"
 export SVDIR="${SVDIR:-$PREFIX/var/service}"  # `sv` also works from inside a service
 SERVICES=(streamfinder-torrserver streamfinder streamfinder-updater)
+# Local Whisper for AI subtitles, when installed (install-whisper.sh)
+[ -d "$PREFIX/var/service/streamfinder-whisper" ] && SERVICES+=(streamfinder-whisper)
 
 # Install the newest version from GitHub (shallow clone: fetch + reset, works after force-pushes).
+# By hand it also asks for keys that are still missing (the update service has no terminal).
 update() {
   git -C "$DIR" fetch --depth 1 origin master || return 1
+  local keys=0
   if [ "$(git -C "$DIR" rev-parse HEAD)" = "$(git -C "$DIR" rev-parse FETCH_HEAD)" ]; then
+    bash "$DIR/setup-keys.sh" "$DIR/.env" || keys=$?
     echo "$(date '+%F %T') already up to date ($(git -C "$DIR" rev-parse --short HEAD))"
+    if [ "$keys" = 2 ]; then ensure_daemon; sv restart streamfinder; fi
     return 0
   fi
   git -C "$DIR" reset --hard FETCH_HEAD || return 1
   pip install -q -r "$DIR/requirements.txt" || return 1
+  # The new version may bring new services or a new version of this command.
+  bash "$DIR/termux-install.sh" --refresh || true
+  bash "$DIR/setup-keys.sh" "$DIR/.env" || true
   ensure_daemon
   sv restart streamfinder
   echo "$(date '+%F %T') updated to $(git -C "$DIR" rev-parse --short HEAD)"
@@ -164,7 +178,8 @@ case "${1:-status}" in
   *) echo "usage: streamfinder start|stop|restart|status|update|logs"; exit 1 ;;
 esac
 SCRIPT
-chmod +x "$PREFIX/bin/streamfinder"
+chmod +x "$PREFIX/bin/streamfinder.new"
+mv -f "$PREFIX/bin/streamfinder.new" "$PREFIX/bin/streamfinder"
 
 # After a reboot (needs the Termux:Boot app, opened once): take the wake lock and start the
 # service supervisor, which brings both services up.
@@ -175,6 +190,22 @@ termux-wake-lock
 . "$PREFIX/etc/profile"
 BOOT
 chmod +x "$HOME/.termux/boot/streamfinder"
+
+# Local Whisper for AI subtitles - on by default (opt out: touch cache/.no-whisper).
+if [ ! -x "$HOME/whisper.cpp/build/bin/whisper-server" ] && [ ! -f "$DIR/cache/.no-whisper" ]; then
+  bash "$DIR/install-whisper.sh" || echo "!! Local Whisper could not be installed - AI subtitles can use a Groq key instead (Settings)."
+fi
+if [ -x "$HOME/whisper.cpp/build/bin/whisper-server" ] && ! grep -q '^TRANSCRIBE_PROVIDER=' "$DIR/.env"; then
+  { echo "TRANSCRIBE_PROVIDER=local"; echo "TRANSCRIBE_API_URL=http://127.0.0.1:8178/v1"; } >> "$DIR/.env"
+fi
+
+if [ "$REFRESH" = 1 ]; then
+  ensure_daemon() { pgrep -f "runsvdir $PREFIX/var/service" >/dev/null || service-daemon start >/dev/null 2>&1 || true; }
+  ensure_daemon
+  sleep 1
+  sv up streamfinder-updater >/dev/null 2>&1 || true
+  exit 0
+fi
 
 streamfinder start
 echo

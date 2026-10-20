@@ -56,6 +56,9 @@ APIBAY_MIRRORS = _env_list("APIBAY_MIRRORS", "https://apibay.org")
 
 KNABEN_MIRRORS = _env_list("KNABEN_MIRRORS", "https://api.knaben.org")
 TORRENTS_CSV_MIRRORS = _env_list("TORRENTS_CSV_MIRRORS", "https://torrents-csv.com")
+# SkTorrent (Czech/Slovak tracker, free account at https://sktorrent.eu): searched when set.
+SKTORRENT_USERNAME = os.getenv("SKTORRENT_USERNAME", "").strip()
+SKTORRENT_PASSWORD = os.getenv("SKTORRENT_PASSWORD", "").strip()
 
 # Subtitles (OpenSubtitles.com: free API key at https://www.opensubtitles.com/consumers)
 SUBTITLE_LANGUAGES = _env_list("SUBTITLE_LANGUAGES", "cs,sk,en")
@@ -66,6 +69,22 @@ OPENSUBTITLES_USER_AGENT = os.getenv("OPENSUBTITLES_USER_AGENT", "StreamFinder v
 SUBTITLE_CACHE_DIR = os.getenv(
     "SUBTITLE_CACHE_DIR", os.path.join(BASE_DIR, "cache", "subtitles")
 )
+
+# AI subtitles: speech-to-text (Whisper) behind an OpenAI-compatible API.
+# A free Groq key (https://console.groq.com/keys) is enough; OpenAI keys work too.
+TRANSCRIBE_API_KEY = os.getenv("TRANSCRIBE_API_KEY", "").strip()
+# Address of a local Whisper server (whisper.cpp from install-whisper.sh: http://127.0.0.1:8178/v1)
+TRANSCRIBE_API_URL = os.getenv("TRANSCRIBE_API_URL", "").strip()
+# Which one transcribes: "local" (the Whisper server) or "api" (the key); empty = whichever is set
+TRANSCRIBE_PROVIDER = os.getenv("TRANSCRIBE_PROVIDER", "").strip()
+# Off until the admin switches AI subtitles on in Settings (the installers only prepare them).
+TRANSCRIBE_ENABLED = os.getenv("TRANSCRIBE_ENABLED", "false").strip()
+
+
+def flag(value) -> bool:
+    """A setting that may be a bool or a string saved from the Settings page."""
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
 
 IMDB_DB_PATH = os.getenv(
     "IMDB_DB_PATH", os.path.join(BASE_DIR, "cache", "imdb_ratings.sqlite")
@@ -87,6 +106,12 @@ EDITABLE_KEYS = (
     "OPENSUBTITLES_API_KEY",
     "OPENSUBTITLES_USERNAME",
     "OPENSUBTITLES_PASSWORD",
+    "TRANSCRIBE_API_KEY",
+    "TRANSCRIBE_API_URL",
+    "TRANSCRIBE_PROVIDER",
+    "TRANSCRIBE_ENABLED",
+    "SKTORRENT_USERNAME",
+    "SKTORRENT_PASSWORD",
 )
 
 

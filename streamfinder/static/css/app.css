@@ -1478,32 +1478,100 @@ select option:checked {
   right: clamp(12px, 3vw, 32px);
   bottom: 96px;
   z-index: 3;
-  width: min(420px, calc(100vw - 24px));
-  max-height: calc(100vh - 200px);
-  overflow: auto;
+  width: min(480px, calc(100vw - 24px));
+  max-height: calc(100vh - 170px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 10px;
+  padding: 6px 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(24, 24, 24, 0.97);
+  border-radius: 12px;
+  background: rgba(22, 22, 22, 0.98);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+.menu-head {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 -12px;
+  padding: 10px 12px 8px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(22, 22, 22, 0.98);
+}
+.menu-head strong {
+  font-size: 17px;
+}
+.menu-close {
+  width: 36px;
+  height: 36px;
 }
 .subs-options {
   display: grid;
   gap: 2px;
 }
 .subs-group {
-  padding: 10px 10px 4px;
-  font-size: 12px;
-  color: var(--text-3);
+  margin-top: 6px;
+  padding: 12px 10px 6px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.subs-options > .subs-group:first-child,
+.subs-options > .subs-option:first-child + .subs-group {
+  border-top: 0;
+}
+.subs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 10px 2px 2px;
+  border-top: 1px solid var(--line);
+}
+.subs-tabs .chip {
+  font-size: 13px;
+}
+.subs-tabs .chip[aria-selected="true"] {
+  background: var(--text);
+  color: #000;
+}
+.subs-list {
+  display: grid;
+  gap: 2px;
+}
+.subs-ai strong::before {
+  content: "AI";
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: 2px;
+}
+.subs-more > summary {
+  padding: 8px 10px 8px 42px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
 }
 .subs-option {
   width: 100%;
+  min-height: 48px;
   display: grid;
   grid-template-columns: 22px 1fr;
   align-items: start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 10px 12px;
   border: 0;
   border-radius: var(--radius);
   background: none;
@@ -1520,9 +1588,17 @@ select option:checked {
 .subs-option[aria-checked="true"] .icon {
   opacity: 1;
 }
+.subs-option > span {
+  min-width: 0;
+}
 .subs-option strong {
-  font-size: 14px;
+  display: block;
+  font-size: 15px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.subs-option[aria-checked="true"] {
+  background: rgba(255, 255, 255, 0.1);
 }
 .subs-option small {
   display: block;
@@ -1869,8 +1945,21 @@ select option:checked {
   grid-template-columns: 64px 1fr auto;
   align-items: center;
   gap: 4px 14px;
-  padding: 12px 6px;
+  padding: 12px 8px;
   border-bottom: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.version:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.version-group {
+  padding: 18px 8px 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.version-group:first-child {
+  padding-top: 4px;
 }
 .version-quality {
   padding: 4px 0;
@@ -1968,6 +2057,18 @@ select option:checked {
 .size-big {
   color: var(--ok);
 }
+.lang-tag {
+  padding: 0 7px;
+  border-radius: 4px;
+  font-weight: 700;
+  background: var(--good);
+  color: #000;
+}
+.lang-subs {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--text-2);
+  color: var(--text);
+}
 .versions-low {
   margin-top: 18px;
 }
@@ -2003,22 +2104,162 @@ select option:checked {
 /* =================================================================== settings */
 
 .setup-note { margin-bottom: 20px; padding: 14px 16px; border-radius: 8px; background: rgba(245, 197, 24, 0.12); color: var(--text); }
-.keys { margin-bottom: 32px; }
-.keys-title { font-size: 20px; font-weight: 700; }
-.key-form { display: grid; gap: 8px; padding: 16px; border-radius: 8px; background: var(--surface); }
-.key-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.key-state { font-size: 13px; font-weight: 600; color: var(--text-3); }
-.key-state[data-ok="true"] { color: var(--good); }
-.key-state[data-ok="false"] { color: var(--ok); }
-.key-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.key-row input { flex: 1 1 200px; }
-.key-row .btn { padding: 9px 18px; font-size: 15px; }
-.key-login summary { cursor: pointer; font-size: 14px; color: var(--text-2); padding: 4px 0; }
-.key-login .key-row { margin-top: 8px; }
-.key-remove { justify-self: start; padding: 0; border: 0; background: none; color: var(--text-3); font-size: 13px; text-decoration: underline; cursor: pointer; }
-.key-message { min-height: 1.2em; font-size: 14px; color: var(--text-2); }
-.key-message.ok { color: var(--good); }
-.key-message.bad { color: var(--bad); }
+.admin-panel {
+  margin-top: 40px;
+}
+.admin-panel > summary {
+  display: grid;
+  gap: 2px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  cursor: pointer;
+  list-style: none;
+}
+.admin-panel > summary::-webkit-details-marker {
+  display: none;
+}
+.admin-panel > summary strong {
+  font-size: 20px;
+}
+.admin-panel > summary strong::after {
+  content: " ▾";
+  color: var(--text-3);
+}
+.admin-panel[open] > summary {
+  margin-bottom: 14px;
+}
+.admin-panel[open] > summary strong::after {
+  content: " ▴";
+}
+.setting-advanced > summary {
+  padding: 8px 16px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.setting.keys {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 36px;
+  padding: clamp(14px, 3vw, 22px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.keys-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+.key-form {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.key-head strong {
+  font-size: 17px;
+}
+.key-state {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.key-state:empty {
+  display: none;
+}
+.key-state[data-ok="true"] {
+  background: rgba(70, 211, 105, 0.14);
+  color: var(--good);
+}
+.key-state[data-ok="false"] {
+  background: rgba(245, 197, 24, 0.12);
+  color: var(--ok);
+}
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.key-row input {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.key-row input:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 1px;
+}
+.key-row .btn {
+  min-height: 44px;
+  padding: 9px 20px;
+  font-size: 15px;
+}
+.key-form > .key-row:last-of-type:has(> .btn:only-child) {
+  justify-content: flex-end;
+}
+.key-form .choice,
+.key-form .setting-row {
+  background: var(--surface);
+}
+.key-form .toggle {
+  padding: 6px 0;
+}
+.key-login summary {
+  padding: 4px 0;
+  font-size: 14px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.key-login .key-row {
+  margin-top: 8px;
+}
+.key-remove {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.key-message {
+  min-height: 1.2em;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.key-message:empty {
+  display: none;
+}
+.key-message.ok {
+  color: var(--good);
+}
+.key-message.bad {
+  color: var(--bad);
+}
 
 
 .settings {
@@ -2313,11 +2554,18 @@ select option:checked {
     animation-name: sheet-up;
   }
   .version {
-    grid-template-columns: 52px 1fr;
+    grid-template-columns: 52px 1fr auto;
+    gap: 4px 10px;
   }
-  .version .tool-btn {
-    grid-column: 1 / -1;
-    justify-self: start;
+  .version-play {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .version-play span {
+    display: none;
   }
   .pick {
     grid-template-columns: 1fr;

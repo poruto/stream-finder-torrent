@@ -35,6 +35,7 @@ from .providers import (
     TorrentsCSVProvider,
     YTSProvider,
 )
+from .sktorrent import SkTorrentProvider
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,28 @@ _SOURCE_LABEL = {
 }
 
 
+_SUBTITLE_TOKENS = {"titulky", "cztit", "cztitulky", "sktit", "subs", "sub"}
+
+
+def czech_kind(info: ReleaseInfo) -> str | None:
+    """'dub' for Czech/Slovak audio, 'subs' for Czech/Slovak subtitles only, else None."""
+    if not (info.has_czech or info.has_slovak):
+        return None
+    if info.tokens & _SUBTITLE_TOKENS and "dabing" not in info.tokens:
+        return "subs"
+    return "dub"
+
+
+def czech_bonus(info: ReleaseInfo) -> float:
+    """Ranking bonus for Czech versions: enough to beat a far better seeded English one."""
+    kind = czech_kind(info)
+    if kind is None:
+        return 0.0
+    if info.has_czech:
+        return 22.0 if kind == "dub" else 10.0
+    return 14.0 if kind == "dub" else 6.0
+
+
 def build_magnet(info_hash: str, name: str) -> str:
     return f"magnet:?xt=urn:btih:{info_hash}&dn={quote(name)}" + "".join(
         f"&tr={quote(t)}" for t in TRACKERS
@@ -98,6 +121,10 @@ class SearchQuery:
     )  # season -> episode count
     total_episodes: int | None = None
     free_text: bool = False
+    # Czech/Slovak versions: also search by the Czech title and for "CZ" releases,
+    # and rank dubbed / subtitled Czech releases higher.
+    czech: bool = False
+    local_titles: list[str] = field(default_factory=list)
 
     def episodes_in(self, info: ReleaseInfo) -> int | None:
         """How many episodes a torrent contains (1 for a single movie/episode)."""
@@ -119,19 +146,30 @@ class SearchQuery:
     def text_queries(self) -> list[str]:
         if self.free_text:
             return [self.title]
+        queries = self._queries_for(self.title)
+        if self.czech:
+            # Czech releases: "Pelisky 1999 CZ", "Avatar CZ dabing", "Pratele S01E02 CZ"
+            for title in self.local_titles:
+                queries += self._queries_for(title)[:1]
+            queries.append(f"{self._queries_for(self.title)[0]} CZ")
+            if self.media_type == "movie" and self.year:
+                queries.append(f"{self.title} CZ")
+        return list(dict.fromkeys(q for q in queries if q.strip()))
+
+    def _queries_for(self, title: str) -> list[str]:
         if self.media_type == "movie":
-            return [f"{self.title} {self.year}" if self.year else self.title]
+            return [f"{title} {self.year}" if self.year else title]
         if self.season is not None and self.episode is not None:
             return [
-                f"{self.title} S{self.season:02d}E{self.episode:02d}",
-                f"{self.title} S{self.season:02d}",
+                f"{title} S{self.season:02d}E{self.episode:02d}",
+                f"{title} S{self.season:02d}",
             ]
         if self.season is not None:
             return [
-                f"{self.title} S{self.season:02d}",
-                f"{self.title} Season {self.season}",
+                f"{title} S{self.season:02d}",
+                f"{title} Season {self.season}",
             ]
-        return [self.title]
+        return [title]
 
     def cache_key(self) -> tuple:
         return (
@@ -142,6 +180,7 @@ class SearchQuery:
             self.episode,
             self.free_text,
             self.quality,
+            self.czech,
         )
 
 
@@ -195,7 +234,7 @@ class TorrentResult:
             ["SK"] if self.info.has_slovak else []
         )
         return {
-            "name": self.raw.name,
+            "name": self.raw.title or self.raw.name,
             "hash": self.raw.info_hash,
             "magnet": self.raw.magnet
             or build_magnet(self.raw.info_hash, self.raw.name),
@@ -213,6 +252,7 @@ class TorrentResult:
             "cam": self.info.is_cam,
             "pack": pack,
             "languages": languages,
+            "czech": czech_kind(self.info),
             "availability": self.availability,
             "gb_per_hour": round(self.gb_per_hour, 2) if self.gb_per_hour else None,
             "per_episode": format_size(self.per_episode)
@@ -224,7 +264,7 @@ class TorrentResult:
 
 
 def choose_picks(
-    ranked: list[TorrentResult], quality: int | None = None
+    ranked: list[TorrentResult], quality: int | None = None, czech: bool = False
 ) -> dict[str, str | None]:
     """Pick the recommended / best-quality / smallest versions (by info hash)."""
     playable = [
@@ -254,7 +294,14 @@ def choose_picks(
     in_browser = [
         r for r in candidates if r.info.browser_friendly is True and r.raw.seeders >= 5
     ]
-    if in_browser and quality != 2160:
+    # Czech wanted: the best dubbed version that streams reasonably, even if the
+    # browser needs its audio converted (Czech releases are mostly MKV with AC3).
+    dubbed = [
+        r for r in candidates if czech_kind(r.info) == "dub" and r.raw.seeders >= 5
+    ]
+    if czech and dubbed:
+        recommended = dubbed[0]
+    elif in_browser and quality != 2160:
         recommended = in_browser[0]
     else:
         recommended = candidates[0] if candidates else (ranked[0] if ranked else None)
@@ -324,6 +371,10 @@ class TorrentSearcher:
             KnabenProvider(config.KNABEN_MIRRORS, timeout),
             TorrentsCSVProvider(config.TORRENTS_CSV_MIRRORS, timeout),
         ]
+        self.sktorrent = SkTorrentProvider(
+            config.SKTORRENT_USERNAME, config.SKTORRENT_PASSWORD, timeout
+        )
+        self.providers.append(self.sktorrent)
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="torrents")
         self._cache: dict[tuple, tuple[float, dict[str, Any]]] = {}
         self._lock = threading.Lock()
@@ -354,7 +405,7 @@ class TorrentSearcher:
         ranked = self._rank(raw, query)
         result = {
             "results": [r.to_dict() for r in ranked[: config.MAX_TORRENT_RESULTS]],
-            "picks": choose_picks(ranked, query.quality),
+            "picks": choose_picks(ranked, query.quality, query.czech),
             "notice": notice_for(ranked),
             "total_found": len({r.info_hash for r in raw}),
             "failed_providers": sorted(failed),
@@ -388,9 +439,9 @@ class TorrentSearcher:
                 existing.magnet = existing.magnet or item.magnet
                 if item.provider not in providers:
                     providers.append(item.provider)
-                # YTS names are synthesised from structured data, so prefer them for parsing.
-                if item.provider == "YTS":
-                    existing.name = item.name
+                # YTS and SkTorrent names are rebuilt from structured data: better for parsing.
+                if item.provider in ("YTS", "SkTorrent"):
+                    existing.name, existing.title = item.name, item.title
             else:
                 merged[item.info_hash] = (item, [item.provider])
 
@@ -407,6 +458,8 @@ class TorrentSearcher:
             episodes = query.episodes_in(info)
             if pack_kind(info) and episodes and item.size:
                 result.per_episode = item.size // episodes
+            if query.czech:
+                result.score = round(result.score + czech_bonus(info), 1)
             cap = GB_PER_HOUR_CAP[query.quality]
             if result.gb_per_hour and result.gb_per_hour > cap:
                 result.oversized = True
@@ -416,6 +469,14 @@ class TorrentSearcher:
             ranked.append(result)
         ranked.sort(key=lambda r: (r.score, r.raw.seeders), reverse=True)
         return ranked
+
+    def clear_cache(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    def extra_trackers(self, info_hash: str) -> list[str]:
+        """Private announce URLs for a torrent found on a tracker that has them."""
+        return self.sktorrent.extra_trackers(info_hash)
 
     def provider_status(self) -> list[dict[str, Any]]:
         availability = list(self._pool.map(lambda p: p.is_available(), self.providers))

@@ -77,7 +77,8 @@
 
   function findVersions(target, query = "") {
     const quality = SF.settings.quality();
-    const key = `${targetKey(target)}|${query}|${quality}`;
+    const czech = SF.settings.czech();
+    const key = `${targetKey(target)}|${query}|${quality}|${czech}`;
     if (!state.versions.has(key)) {
       const request = api("/api/torrents", {
         tmdb_id: ctx.tmdb_id,
@@ -87,6 +88,7 @@
         runtime: target.runtime,
         quality,
         query,
+        czech,
       });
       request.catch(() => state.versions.delete(key));
       state.versions.set(key, request);
@@ -127,6 +129,7 @@
 
   function facts(v) {
     return [
+      languageTag(v),
       v.pack ? el("span", {}, [t(`pack_${v.pack}`)]) : null,
       availabilityNode(v),
       el("span", { className: v.oversized ? "size-big" : "" }, [
@@ -134,15 +137,22 @@
       ]),
       v.browser === true
         ? el("span", { className: "browser-ok" }, [t("browser_ok")])
-        : v.browser === false
+        : v.browser === false && !ctx.convert
           ? el(
               "span",
               { className: "browser-no", title: t("browser_no_title") },
               [t("browser_no")],
             )
           : null,
-      v.languages.length ? el("span", {}, [v.languages.join(", ")]) : null,
     ];
+  }
+
+  // "CZ dabing" / "CZ titulky" / nothing for versions in the original language.
+  function languageTag(v) {
+    if (!v.languages.length) return null;
+    const langs = v.languages.join("/");
+    const kind = v.czech === "subs" ? "subs" : "dub";
+    return el("span", { className: `lang-tag lang-${kind}` }, [t(`lang_${kind}`, { l: langs })]);
   }
 
   // ============================================================= hero
@@ -523,8 +533,15 @@
     wakeControls();
   }
 
+  // Tell TorrServer to stop downloading a torrent we no longer play (fire and forget).
+  function stopTorrent(hash) {
+    video.pause();
+    fetch(`/api/torrent-stop/${hash}`, { method: "POST", keepalive: true }).catch(() => {});
+  }
+
   function closePlayer() {
     saveProgress(true);
+    if (state.current?.hash) stopTorrent(state.current.hash);
     Object.keys(state.timers).forEach(clearTimer);
     video.pause();
     video.removeAttribute("src");
@@ -585,7 +602,10 @@
   }
 
   const anyMenuOpen = () =>
-    !$("subs-menu").hidden || !episodesMenu.hidden || !$("versions").hidden;
+    !$("subs-menu").hidden ||
+    !$("audio-menu").hidden ||
+    !episodesMenu.hidden ||
+    !$("versions").hidden;
 
   function wakeControls() {
     playerEl.classList.remove("is-idle");
@@ -620,6 +640,7 @@
   function closeMenus() {
     for (const [menu, button] of [
       [$("subs-menu"), $("subs-btn")],
+      [$("audio-menu"), $("audio-btn")],
       [episodesMenu, episodesBtn],
     ]) {
       menu.hidden = true;
@@ -658,6 +679,12 @@
       return;
     }
     openPlayer(target);
+    if (state.current?.hash && torrent?.hash && torrent.hash !== state.current.hash) {
+      // A different version was picked: silence and stop the old one at once.
+      stopTorrent(state.current.hash);
+      video.removeAttribute("src");
+      video.load();
+    }
     const saved = progress.get(progressKey) || {};
     const stored = storedFor(target);
     let startAt =
@@ -738,6 +765,8 @@
       }
       if (torrent.hash) state.tried.add(torrent.hash);
       state.tried.add(data.hash);
+      // Another torrent than the one playing: stop that one downloading right away.
+      if (state.current?.hash && state.current.hash !== data.hash) stopTorrent(state.current.hash);
       state.current = {
         target,
         torrent,
@@ -750,7 +779,9 @@
         streamUrl: data.stream_url,
       };
       renderFiles(data.files, data.file);
+      $("audio-btn").hidden = true;
       const mode = await chooseMode(state.current);
+      renderAudioMenu();
       if (state.current?.hash !== data.hash) return; // another play() started meanwhile
       setStep("buffer", data.file.name);
       if (mode) await startConverted(startAt, mode);
@@ -798,11 +829,93 @@
     }
     if (!info.available || !info.probed) return null;
     current.probe = info;
+    const track = preferredAudio(info.audio || []);
+    current.audioTrack = track;
+    const chosen = (info.audio || [])[track];
+    if (track > 0) return { copyAudio: Boolean(chosen?.browser_ok), audio: track };
     if (always) return { copyAudio: info.audio_ok };
     if (!info.audio_ok) return { copyAudio: false };
     if (info.matroska && !isChromium) return { copyAudio: true };
     return null;
   }
+
+  // Index of the audio track to play: the user's pick, else Czech/Slovak if wanted, else the first.
+  function preferredAudio(tracks) {
+    if (tracks.length < 2) return 0;
+    if (SF.settings.czech()) {
+      const czech = tracks.findIndex((a) => ["cze", "ces", "cs", "slk", "slo", "sk"].includes((a.language || "").toLowerCase()));
+      if (czech > 0) return czech;
+    }
+    return 0;
+  }
+
+  const LANG3 = { cze: "cs", ces: "cs", slk: "sk", slo: "sk", eng: "en", ger: "de", deu: "de", fre: "fr", fra: "fr", spa: "es", ita: "it", pol: "pl", rus: "ru", hun: "hu", jpn: "ja", kor: "ko", chi: "zh", zho: "zh", por: "pt", dut: "nl", nld: "nl", ukr: "uk" };
+  const languageNames = (() => {
+    try {
+      return new Intl.DisplayNames([SF.lang], { type: "language" });
+    } catch {
+      return null;
+    }
+  })();
+  function audioLabel(track, i) {
+    const code = (track.language || "").toLowerCase();
+    const short = LANG3[code] || (code.length === 2 ? code : "");
+    let name = "";
+    try {
+      name = short && languageNames ? languageNames.of(short) : "";
+    } catch {
+      name = "";
+    }
+    name = name ? name[0].toUpperCase() + name.slice(1) : t("audio_track_n", { n: i + 1 });
+    const channels = track.channels ? (track.channels >= 6 ? "5.1" : track.channels === 2 ? "stereo" : `${track.channels} ch`) : "";
+    const detail = [track.title, (track.codec || "").toUpperCase(), channels].filter(Boolean).join(" · ");
+    return { name, detail };
+  }
+
+  function renderAudioMenu() {
+    const current = state.current;
+    const tracks = current?.probe?.audio || [];
+    const button = $("audio-btn");
+    button.hidden = tracks.length < 2;
+    if (button.hidden) return;
+    const active = current.audioTrack || 0;
+    $("audio-label").textContent = audioLabel(tracks[active], active).name;
+    $("audio-options").replaceChildren(
+      ...tracks.map((track, i) => {
+        const { name, detail } = audioLabel(track, i);
+        const option = el(
+          "button",
+          { type: "button", className: "subs-option", role: "menuitemradio", "aria-checked": String(i === active) },
+          [icon("check"), el("span", {}, [el("strong", {}, [name]), detail ? el("small", {}, [detail]) : null])],
+        );
+        option.addEventListener("click", () => switchAudio(i));
+        return option;
+      }),
+    );
+  }
+
+  // Another audio track: the server's converter picks it (and converts it if the browser can't play it).
+  function switchAudio(index) {
+    const current = state.current;
+    const track = current?.probe?.audio?.[index];
+    if (!track || index === (current.audioTrack || 0)) return closeMenus();
+    current.audioTrack = index;
+    closeMenus();
+    renderAudioMenu();
+    toast(t("audio_switching", { name: audioLabel(track, index).name }));
+    $("player-buffering").hidden = false;
+    startConverted(pos(), { copyAudio: Boolean(track.browser_ok), audio: index });
+    if (state.ai) {
+      // The transcript belongs to the old track.
+      applySubtitle(state.activeSub);
+    }
+  }
+  $("audio-btn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMenu($("audio-menu"), $("audio-btn"));
+  });
+  $("audio-menu").addEventListener("click", (event) => event.stopPropagation());
+  for (const button of document.querySelectorAll("[data-close-menu]")) button.addEventListener("click", closeMenus);
 
   async function startConverted(position, mode) {
     const current = state.current;
@@ -815,8 +928,10 @@
       }
     }
     if (current !== state.current) return;
-    current.convert = { offset: start, duration: current.probe?.duration || 0, copyAudio: mode.copyAudio };
-    const url = `/api/transcode/${current.hash}/${current.file.index}.mp4?start=${start}${mode.copyAudio ? "&copy=1" : ""}`;
+    renderAudioMenu();
+    const audio = mode.audio ?? current.audioTrack ?? 0;
+    current.convert = { offset: start, duration: current.probe?.duration || 0, copyAudio: mode.copyAudio, audio };
+    const url = `/api/transcode/${current.hash}/${current.file.index}.mp4?start=${start}${mode.copyAudio ? "&copy=1" : ""}${audio ? `&audio=${audio}` : ""}`;
     // Land exactly on the requested second once the stream (starting at the keyframe) is playing.
     const skipTo = position - start;
     startVideo(url, skipTo > 0.5 ? skipTo : 0, { keepTracks: true });
@@ -841,7 +956,7 @@
     }
     state.seekedAt = Date.now();
     $("player-buffering").hidden = false;
-    startConverted(target, { copyAudio: convert.copyAudio });
+    startConverted(target, { copyAudio: convert.copyAudio, audio: convert.audio });
   }
 
   function startVideo(url, startAt, { keepTracks = false } = {}) {
@@ -1192,8 +1307,9 @@
       if (current !== state.current) return;
       if (info?.available) {
         current.probe = info;
+        current.audioTrack = preferredAudio(info.audio || []);
         toast(t("converting_audio"));
-        startConverted(pos(), { copyAudio: false });
+        startConverted(pos(), { copyAudio: false, audio: current.audioTrack });
         return;
       }
     }
@@ -1423,6 +1539,9 @@
   const subsMenu = $("subs-menu");
 
   function clearTracks() {
+    state.ai = null;
+    // Hide first: Chrome keeps painting the last cue of a removed track that was showing.
+    for (const textTrack of video.textTracks) textTrack.mode = "disabled";
     for (const track of video.querySelectorAll("track")) {
       URL.revokeObjectURL(track.src);
       track.remove();
@@ -1447,19 +1566,23 @@
       });
       if (current !== state.current) return;
       state.subs = data.candidates;
+      state.aiAvailable = Boolean(data.ai);
       subsBtn.disabled = false;
       renderSubsMenu();
       const settings = SF.settings.get();
-      if (!settings.auto || !data.candidates.length) {
+      if (!settings.auto || (!data.candidates.length && !(settings.subsMissing === "ai" && state.aiAvailable))) {
         subsLabel.textContent = data.candidates.length
           ? t("subs_off")
           : t("subs_none");
         return;
       }
-      await applySubtitle(
-        data.candidates.find((c) => c.language === settings.primary) ||
-          data.best,
-      );
+      const mine = data.candidates.find((c) => c.language === settings.primary);
+      if (mine) return await applySubtitle(mine);
+      // Nothing in my language: translate another one, or write them from the audio.
+      if (settings.subsMissing === "ai" && state.aiAvailable) return await applySubtitle(aiCandidate(settings.aiTarget ?? "en"));
+      if (settings.subsMissing === "translate" && data.best)
+        return await applySubtitle(translatedCandidate(data.candidates.find((c) => c.language === settings.fallback) || data.best, settings.primary));
+      await applySubtitle(data.best);
     } catch {
       if (current === state.current) {
         subsLabel.textContent = t("subs_unavailable");
@@ -1469,13 +1592,19 @@
     }
   }
 
+  // "Interstellar.2014.1080p.BluRay.x264-YIFY" -> "Interstellar 2014 1080p BluRay x264 YIFY"
+  const readableRelease = (name) => (name || "").replace(/\.(srt|sub|ass|vtt)$/i, "").replace(/[._-]+/g, " ").trim();
+
+  // Which tab of the subtitles menu is open: a language code, "translate" or "ai".
+  let subsTab = null;
+
   function renderSubsMenu() {
-    const option = (checked, title, detail, onClick) => {
+    const option = (checked, title, detail, onClick, extra = "") => {
       const button = el(
         "button",
         {
           type: "button",
-          className: "subs-option",
+          className: `subs-option ${extra}`.trim(),
           role: "menuitemradio",
           "aria-checked": String(checked),
           title: detail || null,
@@ -1491,35 +1620,122 @@
       button.addEventListener("click", onClick);
       return button;
     };
+    const settings = SF.settings.get();
+    const active = state.activeSub;
+    const byLanguage = new Map();
+    for (const c of state.subs) {
+      if (!byLanguage.has(c.language)) byLanguage.set(c.language, []);
+      byLanguage.get(c.language).push(c);
+    }
+    // My language first, then the backup one, then the rest.
+    const rank = (code) => (code === settings.primary ? 0 : code === settings.fallback ? 1 : 2);
+    const languages = [...byLanguage.keys()].sort((x, y) => rank(x) - rank(y));
+    const foreign = languages.filter((code) => code !== settings.primary);
+    const aiTarget = settings.aiTarget ?? "en";
+
+    // Quick choices on top: off, and the AI subtitles in my target language.
     const options = [
-      option(!state.activeSub, t("subs_off_option"), "", () => {
+      option(!active, t("subs_off_option"), "", () => {
         SF.settings.set({ auto: false });
         applySubtitle(null);
       }),
     ];
-    let group = null;
-    for (const c of state.subs) {
-      if (c.language_name !== group) {
-        group = c.language_name;
-        options.push(el("div", { className: "subs-group" }, [group]));
-      }
+    if (state.aiAvailable) {
+      const ai = aiCandidate(aiTarget);
       options.push(
         option(
-          state.activeSub?.id === c.id,
-          c.note ? t(`note_${c.note}`) : t("subtitles"),
-          c.release,
+          active?.id === ai.id,
+          aiTarget ? t("subs_ai_translated", { lang: languageName(aiTarget) }) : t("subs_ai_original"),
+          t("subs_ai_help"),
+          () => applySubtitle(ai),
+          "subs-ai",
+        ),
+      );
+    }
+
+    // Tabs: one per language with subtitles, then "translate" and "AI".
+    const tabs = [
+      ...languages.map((code) => [code, `${languageName(code)} (${byLanguage.get(code).length})`]),
+      ...(foreign.length ? [["translate", t("subs_tab_translate")]] : []),
+      ...(state.aiAvailable ? [["ai", t("subs_tab_ai")]] : []),
+    ];
+    const tabOf = (sub) =>
+      !sub ? null : sub.source === "ai" ? "ai" : sub.translatedFrom ? "translate" : sub.language;
+    if (!tabs.some(([key]) => key === subsTab)) {
+      subsTab = tabOf(active) || (languages.includes(settings.primary) ? settings.primary : tabs[0]?.[0] || null);
+    }
+    if (tabs.length) {
+      const bar = el("div", { className: "subs-tabs", role: "tablist" });
+      for (const [key, label] of tabs) {
+        const tab = el(
+          "button",
+          { type: "button", className: "chip", role: "tab", "aria-selected": String(key === subsTab) },
+          [label],
+        );
+        tab.addEventListener("click", () => {
+          subsTab = key;
+          renderSubsMenu();
+        });
+        bar.append(tab);
+      }
+      options.push(bar);
+    }
+
+    const list = [];
+    if (subsTab === "translate") {
+      for (const code of foreign) {
+        const candidate = translatedCandidate(byLanguage.get(code)[0], settings.primary);
+        list.push(
+          option(
+            active?.id === candidate.id,
+            t("subs_translate_into", { from: languageName(code), to: languageName(settings.primary) }),
+            t(`translator_${translatorEngine()}`),
+            () => applySubtitle(candidate),
+          ),
+        );
+      }
+    } else if (subsTab === "ai") {
+      for (const translate of [aiTarget, ""].filter((v, i, all) => all.indexOf(v) === i)) {
+        const candidate = aiCandidate(translate);
+        list.push(
+          option(
+            active?.id === candidate.id,
+            translate ? t("subs_ai_translated", { lang: languageName(translate) }) : t("subs_ai_original"),
+            t("subs_ai_help"),
+            () => applySubtitle(candidate),
+          ),
+        );
+      }
+    } else if (subsTab && byLanguage.has(subsTab)) {
+      const subs = byLanguage.get(subsTab);
+      const rows = subs.map((c, i) =>
+        option(
+          active?.id === c.id,
+          readableRelease(c.release) || t("subs_version_n", { n: i + 1 }),
+          c.note ? t(`note_${c.note}`) : t(`subs_source_${c.source === "torrent" ? "torrent" : "online"}`),
           () => {
             SF.settings.set({ auto: true, primary: c.language });
             applySubtitle(c);
           },
         ),
       );
+      const current = subs.findIndex((c) => c.id === active?.id);
+      const shown = Math.max(4, current + 1);
+      list.push(...rows.slice(0, shown));
+      if (rows.length > shown) {
+        list.push(
+          el("details", { className: "subs-more" }, [
+            el("summary", {}, [t("subs_more", { n: rows.length - shown })]),
+            ...rows.slice(shown),
+          ]),
+        );
+      }
     }
-    if (!state.subs.length)
-      options.push(
-        el("p", { className: "muted subs-help" }, [t("subs_not_found")]),
-      );
+    if (!state.subs.length && !state.aiAvailable)
+      list.push(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
+    options.push(el("div", { className: "subs-list" }, list));
     $("subs-options").replaceChildren(...options);
+    $("subs-autosync").disabled = !active || active.source === "ai";
   }
 
   async function applySubtitle(candidate, attempt = 0) {
@@ -1530,7 +1746,8 @@
       renderSubsMenu();
       return;
     }
-    subsLabel.textContent = `${candidate.language_name}…`;
+    if (candidate.source === "ai") return startAiSubtitles(candidate);
+    subsLabel.textContent = candidate.translatedFrom ? t("subs_translating") : `${candidate.language_name}…`;
     try {
       // Fetch first so a failed download can fall back instead of failing silently.
       const response = await fetch(candidate.url);
@@ -1578,24 +1795,136 @@
   // Cue time = original * scale + automatic sync + the user's manual offset,
   // minus the start of a converted stream (whose clock begins at 0 there).
   function applyOffset() {
-    const track = video.querySelector("track");
-    const cues = track?.track.cues;
+    const cues = video.querySelector("track")?.track.cues;
     if (!cues || !cues.length) return;
-    track.originalTimes ??= Array.from(cues, (cue) => [cue.startTime, cue.endTime]);
+    Array.from(cues).forEach(placeCue);
+  }
+
+  function placeCue(cue) {
+    cue.orig ??= [cue.startTime, cue.endTime];
     const scale = state.subSync?.scale || 1;
     const shift = (state.subSync?.offset || 0) + state.subOffset - (converted()?.offset || 0);
-    Array.from(cues).forEach((cue, i) => {
-      const [start, end] = track.originalTimes[i];
-      cue.startTime = Math.max(0, start * scale + shift);
-      cue.endTime = Math.max(0, end * scale + shift);
+    cue.startTime = Math.max(0, cue.orig[0] * scale + shift);
+    cue.endTime = Math.max(0, cue.orig[1] * scale + shift);
+  }
+
+  // ------------------------------------------------------------- AI subtitles
+  // Made on the server from the audio, one 30 s window at a time, a window ahead
+  // of the playback position (same grid as the server's subtitle sync).
+
+  const AI_WINDOW = 30;
+  const languageName = (code) => {
+    try {
+      const name = languageNames?.of(code) || code;
+      return name[0].toUpperCase() + name.slice(1);
+    } catch {
+      return code;
+    }
+  };
+  const translatorEngine = () => (SF.settings.get().translator === "ai" && state.aiAvailable ? "ai" : "google");
+  const translatedCandidate = (c, target) => ({
+    ...c,
+    id: `${c.id}|${target}`,
+    syncId: c.id, // the original text is what matches the speech
+    url: `/api/subtitles/${c.id}.vtt?translate=${target}&engine=${translatorEngine()}`,
+    language: target,
+    language_name: `${languageName(target)} (${t("subs_machine")})`,
+    translatedFrom: c.language,
+  });
+  const aiCandidate = (translate) => ({
+    id: `ai-${translate || "spoken"}`,
+    source: "ai",
+    translate,
+    language: translate || "",
+    language_name: t("subs_ai_label"),
+  });
+
+  async function startAiSubtitles(candidate) {
+    const blob = new Blob(["WEBVTT\n\n"], { type: "text/vtt" });
+    const track = el("track", { kind: "subtitles", label: "AI", srclang: candidate.translate || "und", src: URL.createObjectURL(blob), default: true });
+    video.append(track);
+    track.track.mode = "showing";
+    const ai = { candidate, track, current: state.current, windows: new Map(), inflight: 0, failures: 0, warned: false };
+    state.ai = ai;
+    state.activeSub = candidate;
+    state.subSync = null;
+    subsLabel.textContent = t("subs_ai_starting");
+    renderSubsMenu();
+    // Cues added before the (empty) file has loaded would be dropped when it loads.
+    await new Promise((resolve) => {
+      track.addEventListener("load", resolve, { once: true });
+      setTimeout(resolve, 1500);
     });
+    if (state.ai === ai) aiTick();
+  }
+
+  function aiTick() {
+    const ai = state.ai;
+    if (!ai || ai.stopped || ai.current !== state.current || !state.current) return;
+    const k = Math.floor(pos() / AI_WINDOW);
+    aiFetch(k);
+    aiFetch(k + 1);
+  }
+  video.addEventListener("timeupdate", aiTick);
+
+  async function aiFetch(n) {
+    const ai = state.ai;
+    if (!ai || n < 0 || ai.windows.has(n) || ai.inflight >= 2) return;
+    if (dur() && n * AI_WINDOW >= dur()) return;
+    const current = ai.current;
+    ai.windows.set(n, "loading");
+    ai.inflight += 1;
+    const params = new URLSearchParams({
+      start: String(n * AI_WINDOW),
+      duration: String(AI_WINDOW),
+      audio: String(current.audioTrack || 0),
+      translate: ai.candidate.translate || "",
+      engine: translatorEngine(),
+    });
+    let retryIn = 0;
+    try {
+      const response = await fetch(`/api/subtitles/ai/${current.hash}/${current.file.index}?${params}`);
+      const data = await response.json().catch(() => ({}));
+      if (state.ai !== ai) return;
+      if (!response.ok || !data.success) {
+        ai.windows.delete(n);
+        if ([429, 503, 504].includes(response.status)) {
+          retryIn = (data.retry_after || 10) * 1000;
+          if (!ai.warned) toast(t(response.status === 429 ? "subs_ai_limit" : "subs_ai_slow"));
+          ai.warned = true;
+        } else if ([401, 501].includes(response.status) || ++ai.failures > 4) {
+          ai.stopped = true;
+          subsLabel.textContent = t("subs_failed");
+          toast(t("subs_ai_failed", { error: data.error || response.statusText }));
+        } else {
+          retryIn = 5000;
+        }
+        return;
+      }
+      ai.failures = 0;
+      ai.windows.set(n, "done");
+      const cues = ai.track.track;
+      for (const line of data.lines || []) {
+        const cue = new VTTCue(line.start, line.end, line.text);
+        placeCue(cue);
+        cues.addCue(cue);
+      }
+      if (subsLabel.textContent === t("subs_ai_starting")) subsLabel.textContent = t("subs_ai_label");
+    } catch {
+      ai.windows.delete(n);
+      retryIn = 5000;
+    } finally {
+      ai.inflight -= 1;
+    }
+    if (retryIn) setTimeout(aiTick, retryIn);
+    else aiTick();
   }
 
   // Align the active subtitle to the speech around the current position.
   async function syncSubtitles({ manual = false } = {}) {
     const current = state.current;
     const sub = state.activeSub;
-    if (!current || !sub) return;
+    if (!current || !sub || sub.source === "ai") return;
     const button = $("subs-autosync");
     button.disabled = true;
     button.textContent = t("syncing_subs");
@@ -1603,15 +1932,17 @@
       const result = await api("/api/subtitles/sync", {
         hash: current.hash,
         file_index: current.file.index,
-        subtitle: sub.id,
+        subtitle: sub.syncId || sub.id,
         position: pos(),
+        audio: current.audioTrack || 0,
       });
       if (current !== state.current || sub !== state.activeSub) return;
       if (result.applied) {
         state.subSync = { offset: result.offset, scale: result.scale };
         applyOffset();
         const drift = Math.abs(result.scale - 1) > 0.001;
-        toast(t(drift ? "subs_synced_fps" : "subs_synced", { s: formatShift(result.offset) }));
+        const key = drift ? "subs_synced_fps" : result.method === "text" ? "subs_synced_text" : "subs_synced";
+        toast(t(key, { s: formatShift(result.offset) }));
       } else if (manual) {
         toast(t(result.baseline >= 0.45 ? "subs_already_synced" : "subs_sync_unsure"));
       }
@@ -1773,12 +2104,15 @@
     const versionRow = (v) => {
       const item = el("li", {
         className: "version",
-        dataset: { quality: v.quality || "", browser: String(v.browser) },
+        dataset: { quality: v.quality || "", browser: String(v.browser), lang: v.czech || "orig" },
       });
-      const button = el("button", { type: "button", className: "tool-btn" }, [
+      const button = el("button", { type: "button", className: "tool-btn version-play", "aria-label": t("play") }, [
         icon("play"),
-        t("play"),
+        el("span", {}, [t("play")]),
       ]);
+      item.addEventListener("click", (event) => {
+        if (!event.target.closest("button, .version-confirm")) button.click();
+      });
       button.addEventListener("click", () => {
         const better =
           recommended && recommended.hash !== v.hash && !recommended.low
@@ -1828,7 +2162,20 @@
     };
 
     const list = $("versions-list");
-    list.replaceChildren(...main.map(versionRow));
+    const langOf = (v) => v.czech || "orig";
+    const groups = SF.settings.czech() ? ["dub", "subs", "orig"] : ["orig", "dub", "subs"];
+    const present = groups.filter((g) => main.some((v) => langOf(v) === g));
+    if (present.length > 1) {
+      // Clear sections instead of one long mixed list.
+      list.replaceChildren(
+        ...present.flatMap((g) => [
+          el("li", { className: "version-group", dataset: { lang: g } }, [t(`versions_group_${g}`)]),
+          ...main.filter((v) => langOf(v) === g).map(versionRow),
+        ]),
+      );
+    } else {
+      list.replaceChildren(...main.map(versionRow));
+    }
 
     const qualities = [...new Set(main.map((v) => v.quality).filter(Boolean))];
     const mixedBrowser =
@@ -1838,11 +2185,15 @@
     if (main.length > 4 && (qualities.length > 1 || mixedBrowser)) {
       let active = browserOnly && mixedBrowser ? "browser" : "all";
       const apply = () => {
-        for (const row of list.children) {
+        for (const row of list.querySelectorAll(".version")) {
           row.hidden =
             active === "browser"
               ? row.dataset.browser !== "true"
               : active !== "all" && row.dataset.quality !== active;
+        }
+        // A language section without visible versions disappears too.
+        for (const head of list.querySelectorAll(".version-group")) {
+          head.hidden = ![...list.querySelectorAll(`.version[data-lang="${head.dataset.lang}"]`)].some((row) => !row.hidden);
         }
         for (const chip of filters.children)
           chip.setAttribute(

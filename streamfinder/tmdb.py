@@ -164,6 +164,11 @@ class TMDBClient:
             data["english_title"] = english.get("title") or english.get("name") or ""
         except TMDBError:
             data["english_title"] = ""
+        try:  # Czech releases are named after the Czech title
+            czech = self._get(f"/{media_type}/{tmdb_id}", language="cs-CZ")
+            data["czech_title"] = czech.get("title") or czech.get("name") or ""
+        except TMDBError:
+            data["czech_title"] = ""
         external = data.get("external_ids") or {}
         data["imdb_id"] = data.get("imdb_id") or external.get("imdb_id")
         return data
@@ -208,9 +213,12 @@ class TMDBClient:
         self, requests_: dict[str, tuple[str, dict[str, Any]]]
     ) -> dict[str, dict[str, Any]]:
         """Fetch several list endpoints concurrently: {name: (path, params)} -> {name: data}."""
+        # Worker threads have no request: pick the visitor's language here, or rows
+        # would come back in the server default (Czech titles and posters on the English site).
+        language = _request_locale(self.language)
         with ThreadPoolExecutor(max_workers=min(8, len(requests_) or 1)) as pool:
             futures = {
-                name: pool.submit(self._get, path, 600, None, **params)
+                name: pool.submit(self._get, path, 600, language, **params)
                 for name, (path, params) in requests_.items()
             }
         results = {}
@@ -260,6 +268,7 @@ def match_titles(data: dict[str, Any]) -> list[str]:
         data.get("english_title"),
         data.get("original_title") or data.get("original_name"),
         data.get("title") or data.get("name"),
+        data.get("czech_title"),
     ]
     alternatives = data.get("alternative_titles") or {}
     for alt in alternatives.get("titles") or alternatives.get("results") or []:

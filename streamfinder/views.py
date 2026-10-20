@@ -397,6 +397,7 @@ def movie(tmdb_id: int):
         "runtime": context["runtime"],
         "release_date": context["release_date"],
         "released": context["released"],
+        "convert": services().transcoder.available,
     }
     return render_template("detail.html", player=player, **context)
 
@@ -433,6 +434,7 @@ def show(tmdb_id: int):
         "seasons": seasons,
         "season": current,
         "episodes": season_episodes(tmdb_id, current) if current is not None else [],
+        "convert": services().transcoder.available,
     }
     return render_template(
         "detail.html",
@@ -471,6 +473,8 @@ def settings():
         is_admin=auth.is_admin(),
         default_password=auth.using_default(),
         admin_username=auth.username(),
+        ai_available=services().transcriber.available,
+        ai_translate=services().transcriber.chat_available,
     )
 
 

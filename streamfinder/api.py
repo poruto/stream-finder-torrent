@@ -4,8 +4,10 @@ import json
 import logging
 import re
 import time
+import unicodedata
+from dataclasses import replace
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
@@ -13,8 +15,11 @@ from flask import Blueprint, Response, abort, jsonify, request, stream_with_cont
 from . import auth, config
 from .auth import admin_required
 from .i18n import t
+from .matching import normalize_title
 from .services import services
-from .subtitles.sync import align
+from .subtitles.sync import align, align_text, confirm
+from .subtitles.transcribe import LOCAL_URL, TranscribeError
+from .subtitles.whisper_models import MODELS as WHISPER_MODELS
 from .tmdb import TMDBError, match_titles
 from .torrents import SearchQuery
 from .torrserver import (
@@ -128,6 +133,7 @@ def torrents():
         if s.get("season_number") is not None
     }
     common = dict(
+        czech=bool(body.get("czech")),
         media_type=media_type,
         season=season,
         episode=episode,
@@ -144,16 +150,36 @@ def torrents():
         )
     elif tmdb_id:
         titles = match_titles(data)
+        title = data.get("english_title") or titles[0]
+        local = [data.get("czech_title")]
+        if data.get("original_language") in ("cs", "sk"):
+            local.append(data.get("original_title") or data.get("original_name"))
         query = SearchQuery(
-            title=data.get("english_title") or titles[0],
+            title=title,
             titles=titles,
             year=year_of(data),
             imdb_id=data.get("imdb_id"),
+            local_titles=_search_titles(local, title),
             **common,
         )
     else:
         return jsonify(success=False, error=t("err_missing_query")), 400
     return jsonify(success=True, **services().torrents.search(query))
+
+
+def _search_titles(titles: list[str | None], main: str) -> list[str]:
+    """Extra titles to search by, without diacritics ("Pelíšky" -> "Pelisky") like release names."""
+    seen = {normalize_title(main)}
+    result = []
+    for title in titles:
+        if not title:
+            continue
+        plain = unicodedata.normalize("NFKD", title)
+        plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
+        if normalize_title(plain) not in seen:
+            seen.add(normalize_title(plain))
+            result.append(plain)
+    return result
 
 
 @api.route("/play", methods=["POST"])
@@ -167,6 +193,9 @@ def play():
     if not magnet:
         return jsonify(success=False, error=t("err_bad_magnet")), 400
     torrserver = services().torrserver
+    if match := re.search(r"btih:([a-fA-F0-9]{40})", magnet):
+        extra = services().torrents.extra_trackers(match.group(1))
+        magnet += "".join(f"&tr={quote(url, safe='')}" for url in extra)
     try:
         info_hash = torrserver.add(
             magnet, title=body.get("title") or "", poster=body.get("poster") or ""
@@ -305,6 +334,18 @@ def torrent_stats(info_hash: str):
     )
 
 
+@api.route("/torrent-stop/<info_hash>", methods=["POST"])
+def torrent_stop(info_hash: str):
+    """The player moved on (other version, closed): stop downloading this torrent."""
+    if not _HASH_RE.fullmatch(info_hash):
+        abort(404)
+    try:
+        services().torrserver.drop(info_hash)
+    except TorrServerError as e:
+        return _torrserver_error(e)
+    return jsonify(success=True)
+
+
 @api.route("/torrserver-status")
 def torrserver_status():
     return jsonify(status="online" if services().torrserver.is_online() else "offline")
@@ -346,6 +387,43 @@ def find_subtitles():
         )
     except TorrServerError as e:
         return _torrserver_error(e)
+    return jsonify(
+        success=True,
+        ai=svc.transcriber.available,
+        translators=svc.translator.engines(),
+        **result,
+    )
+
+
+@api.route("/subtitles/ai/<info_hash>/<int:index>")
+def ai_subtitles(info_hash: str, index: int):
+    """AI subtitles for one window of the playing file, made from its audio.
+
+    Query: start, duration (seconds of the file), audio (track number),
+    translate (language code, empty = the spoken language), language (spoken language if known).
+    """
+    svc = services()
+    if not svc.transcriber.available:
+        return jsonify(success=False, error=t("ai_subs_unavailable")), 501
+    file = _torrent_file(info_hash, index)
+    start = max(0.0, request.args.get("start", 0, type=float))
+    duration = request.args.get("duration", 30, type=float)
+    translate_to = (request.args.get("translate") or "").lower()[:2]
+    language = (request.args.get("language") or "").lower()[:2]
+    try:
+        result = svc.transcriber.window(
+            svc.torrserver.stream_url(info_hash, file),
+            start,
+            duration,
+            audio_track=max(0, request.args.get("audio", 0, type=int)),
+            translate_to=translate_to if translate_to.isalpha() else "",
+            language=language if language.isalpha() else "",
+            engine="ai" if request.args.get("engine") == "ai" else "google",
+        )
+    except TranscribeError as e:
+        logger.info("AI subtitles failed at %.0f s: %s", start, e)
+        response = jsonify(success=False, error=str(e), retry_after=e.retry_after)
+        return response, e.status
     return jsonify(success=True, **result)
 
 
@@ -353,39 +431,109 @@ def find_subtitles():
 def sync_subtitles():
     """Align a subtitle to the speech around `position`.
 
-    Body: {hash, file_index, subtitle (candidate id), position}
-    Returns {offset, scale, confidence, applied}: cue times become t * scale + offset.
+    Body: {hash, file_index, subtitle (candidate id), position, audio?}
+    Returns {offset, scale, confidence, applied, method}: cue times become t * scale + offset.
+    `applied` is true only when the shift is certain; otherwise nothing should change.
     """
     body = _body()
     svc = services()
     if not svc.transcoder.available:
         return jsonify(success=False, error="ffmpeg is not installed"), 501
-    file = _torrent_file(
-        (body.get("hash") or "").lower(), _int(body.get("file_index")) or 0
-    )
+    info_hash = (body.get("hash") or "").lower()
+    file = _torrent_file(info_hash, _int(body.get("file_index")) or 0)
+    url = svc.torrserver.stream_url(info_hash, file)
     position = max(0.0, float(body.get("position") or 0))
+    audio_track = max(0, _int(body.get("audio")) or 0)
+    candidate = str(body.get("subtitle") or "")
     try:
-        cues = svc.subtitles.cues(str(body.get("subtitle") or ""))
-        window_start = max(0.0, position - 30)
-        speech = svc.transcoder.speech(
-            svc.torrserver.stream_url((body.get("hash") or "").lower(), file),
-            window_start,
-        )
+        cues = svc.subtitles.cues(candidate)
     except ValueError as e:
         return jsonify(success=False, error=str(e)), 404
-    except Exception as e:  # ffmpeg timeout, download failure
+    except Exception as e:  # download failure
         logger.info("subtitle sync failed: %s", e)
         return jsonify(success=False, error=str(e)), 502
-    if not speech:
+
+    if svc.transcriber.available:
+        try:
+            result = _sync_by_text(
+                svc,
+                url,
+                cues,
+                svc.subtitles.language_of(candidate),
+                position,
+                audio_track,
+            )
+            if result is not None:
+                return jsonify(success=True, **result.to_dict())
+        except TranscribeError as e:  # fall back to speech detection
+            logger.info("text-based subtitle sync failed: %s", e)
+
+    try:
+        result = _sync_by_speech(svc, url, [(s, e) for s, e, _ in cues], position)
+    except Exception as e:  # ffmpeg timeout, slow torrent
+        logger.info("subtitle sync failed: %s", e)
+        return jsonify(success=False, error=str(e)), 502
+    if result is None:
         return jsonify(success=False, error="no speech found"), 422
-    result = align(cues, speech, (window_start, window_start + 120))
     return jsonify(success=True, **result.to_dict())
+
+
+SYNC_WINDOW = 30  # same grid as the player's AI subtitles, so transcripts are shared
+
+
+def _sync_by_text(svc, url, cues, sub_language, position, audio_track):
+    """Match subtitle text with a transcript of the speech; None = can't decide this way."""
+    first = int(max(0.0, position - 45) // SYNC_WINDOW)
+    lines, spoken = [], None
+    for rounds in ((first, first + 1, first + 2), (first + 3, first - 1)):
+        for k in rounds:
+            if k < 0:
+                continue
+            window = svc.transcriber.window(
+                url, k * SYNC_WINDOW, SYNC_WINDOW, audio_track=audio_track
+            )
+            spoken = spoken or window.get("language")
+            lines += [(x["start"], x["end"], x["text"]) for x in window["lines"]]
+        if spoken and sub_language and spoken != sub_language:
+            return None  # other language: only the timing of speech can help
+        result = align_text(cues, sorted(lines))
+        if result.details.get("sure"):
+            return result
+    return None
+
+
+def _sync_by_speech(svc, url, cues, position):
+    """Lay cues over detected speech; confirmed on a second stretch of the film."""
+    start = max(0.0, position - 30)
+    speech = svc.transcoder.speech(url, start)
+    if not speech:
+        return None
+    result = align(cues, speech, (start, start + 120))
+    if not result.applied:
+        return result
+    # An earlier stretch is already downloaded; at the very start look ahead instead.
+    other = start - 150 if start >= 150 else start + 120
+    speech = svc.transcoder.speech(url, other)
+    if not speech:
+        return replace(
+            result, applied=False
+        )  # nothing to confirm it with: change nothing
+    return confirm(result, align(cues, speech, (other, other + 120)))
 
 
 @api.route("/subtitles/<candidate_id>.vtt")
 def subtitle_vtt(candidate_id: str):
+    """A subtitle as WebVTT; ?translate=cs&engine=google|ai for a machine translation."""
+    svc = services()
+    target = (request.args.get("translate") or "").lower()[:2]
+    engine = "ai" if request.args.get("engine") == "ai" else "google"
     try:
-        vtt = services().subtitles.get_vtt(candidate_id)
+        if target.isalpha() and len(target) == 2:
+            vtt = svc.subtitles.translated_vtt(
+                candidate_id, target, engine, svc.translator
+            )
+        else:
+            vtt = svc.subtitles.get_vtt(candidate_id)
     except ValueError as e:
         return Response(str(e), 404, mimetype="text/plain")
     except Exception as e:  # network / quota errors from providers
@@ -403,6 +551,15 @@ def _key_status() -> dict:
         "opensubtitles_login": bool(
             config.OPENSUBTITLES_USERNAME and config.OPENSUBTITLES_PASSWORD
         ),
+        "transcribe": services().transcriber.available,
+        "transcribe_enabled": config.flag(config.TRANSCRIBE_ENABLED),
+        "whisper_quality": services().whisper.current(),
+        "whisper_state": services().whisper.state,
+        "whisper_local": services().whisper.local,
+        "transcribe_key": bool(config.TRANSCRIBE_API_KEY),
+        "transcribe_local": config.TRANSCRIBE_API_URL,  # an address on the LAN, not a secret
+        "transcribe_provider": services().transcriber.provider,
+        "sktorrent": bool(config.SKTORRENT_USERNAME and config.SKTORRENT_PASSWORD),
     }
 
 
@@ -416,13 +573,14 @@ def keys_status():
 @api.route("/keys", methods=["POST"])
 @admin_required
 def keys_update():
-    """Body: any of {tmdb_api_key, opensubtitles_api_key, opensubtitles_username, opensubtitles_password}
-    plus optional remove: ["opensubtitles"]. Every new key is tested before it is saved."""
+    """Body: any of {tmdb_api_key, opensubtitles_api_key, opensubtitles_username, opensubtitles_password,
+    transcribe_api_key} plus optional remove: ["opensubtitles", "transcribe"].
+    Every new key is tested before it is saved."""
     body = _body()
     svc = services()
     value = lambda name: (
         (body.get(name) or "").strip() if isinstance(body.get(name), str) else ""
-    )  # noqa: E731
+    )
     changes: dict[str, str] = {}
 
     tmdb_key = value("tmdb_api_key")
@@ -474,6 +632,93 @@ def keys_update():
                 error=t("key_unreachable", name="OpenSubtitles"),
             ), 502
         changes.update(OPENSUBTITLES_USERNAME=username, OPENSUBTITLES_PASSWORD=password)
+
+    # AI subtitles: where speech is transcribed ("local" Whisper server or "api" key),
+    # the Groq/OpenAI key and the local server's address. Each is checked before saving.
+    provider = value("transcribe_provider")
+    key, url = value("transcribe_api_key"), value("transcribe_api_url").rstrip("/")
+    if url and not re.fullmatch(r"https?://\S+", url):
+        return jsonify(success=False, field="transcribe", error=t("url_invalid")), 400
+    try:
+        if key and not svc.transcriber.check_key(key):
+            return jsonify(
+                success=False, field="transcribe", error=t("key_invalid_speech")
+            ), 400
+        if key:
+            changes["TRANSCRIBE_API_KEY"] = key
+        if provider == "local" or url:
+            local = url or config.TRANSCRIBE_API_URL or LOCAL_URL
+            if not svc.transcriber.check_local(local):
+                return jsonify(
+                    success=False,
+                    field="transcribe",
+                    error=t("whisper_unreachable", url=local),
+                ), 400
+            changes["TRANSCRIBE_API_URL"] = local
+        if provider == "api" and not (key or config.TRANSCRIBE_API_KEY):
+            return jsonify(
+                success=False, field="transcribe", error=t("key_needed_api")
+            ), 400
+    except requests.RequestException:
+        return jsonify(
+            success=False, field="transcribe", error=t("key_unreachable", name="AI")
+        ), 502
+    quality = value("whisper_quality")
+    if quality in WHISPER_MODELS and quality != svc.whisper.current():
+        svc.whisper.select(quality, config.TRANSCRIBE_API_URL or LOCAL_URL)
+
+    if body.get("transcribe_enabled") in ("1", "0", True, False):
+        enable = body["transcribe_enabled"] in ("1", True)
+        changes["TRANSCRIBE_ENABLED"] = "true" if enable else "false"
+        source = (
+            provider
+            or config.TRANSCRIBE_PROVIDER
+            or ("api" if key or config.TRANSCRIBE_API_KEY else "local")
+        )
+        if enable and source == "api" and not (key or config.TRANSCRIBE_API_KEY):
+            return jsonify(
+                success=False, field="transcribe", error=t("key_needed_api")
+            ), 400
+        if enable and source == "local" and "TRANSCRIBE_API_URL" not in changes:
+            local = config.TRANSCRIBE_API_URL or LOCAL_URL
+            if not svc.transcriber.check_local(local):
+                return jsonify(
+                    success=False,
+                    field="transcribe",
+                    error=t("whisper_unreachable", url=local),
+                ), 400
+            changes["TRANSCRIBE_API_URL"] = local
+        if enable and not provider:
+            changes["TRANSCRIBE_PROVIDER"] = source
+    if provider in ("local", "api"):
+        changes["TRANSCRIBE_PROVIDER"] = provider
+    elif key or url:
+        changes["TRANSCRIBE_PROVIDER"] = "api" if key and not url else "local"
+
+    sk_user, sk_password = value("sktorrent_username"), value("sktorrent_password")
+    if sk_user and sk_password:
+        try:
+            if not svc.torrents.sktorrent.check_login(sk_user, sk_password):
+                return jsonify(
+                    success=False, field="sktorrent", error=t("sk_login_invalid")
+                ), 400
+        except requests.RequestException:
+            return jsonify(
+                success=False,
+                field="sktorrent",
+                error=t("key_unreachable", name="SkTorrent"),
+            ), 502
+        changes.update(SKTORRENT_USERNAME=sk_user, SKTORRENT_PASSWORD=sk_password)
+    if "sktorrent" in (body.get("remove") or []):
+        changes.update(SKTORRENT_USERNAME="", SKTORRENT_PASSWORD="")
+
+    if "transcribe" in (body.get("remove") or []):
+        changes.update(
+            TRANSCRIBE_API_KEY="",
+            TRANSCRIBE_API_URL="",
+            TRANSCRIBE_PROVIDER="",
+            TRANSCRIBE_ENABLED="false",
+        )
 
     if "opensubtitles" in (body.get("remove") or []):
         changes.update(

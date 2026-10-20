@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -34,6 +35,7 @@ from ..torrserver import (
 from .formats import (
     HASH_CHUNK,
     LANGUAGE_NAMES,
+    _vtt_time,
     decode_subtitle,
     language_from_filename,
     opensubtitles_hash,
@@ -60,6 +62,9 @@ class SubtitleCandidate:
     machine_translated: bool = False
     downloads: int = 0
     fps: float | None = None
+    file_id: int | None = (
+        None  # OpenSubtitles.com file: downloads 'org-' ones when .org refuses
+    )
 
     @property
     def language_name(self) -> str:
@@ -129,6 +134,13 @@ class SubtitleService:
         ] = {}  # candidate id -> metadata needed to fetch it
         self._hashes: dict[str, str] = {}  # '<hash>:<index>' -> moviehash
         self._pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="subtitles")
+        # OpenSubtitles.org puts downloads behind a bot check at times; then only
+        # subtitles the .com API can deliver are offered, for an hour.
+        self._org_blocked_until = 0.0
+
+    @property
+    def org_blocked(self) -> bool:
+        return time.monotonic() < self._org_blocked_until
 
     def status(self) -> dict[str, Any]:
         return {
@@ -200,7 +212,10 @@ class SubtitleService:
         if not api_items and not org_items and not candidates:
             warnings.append("no_online")
 
-        candidates += self._merge_online(api_items, org_items, video_info, languages)
+        online = self._merge_online(api_items, org_items, video_info, languages)
+        if self.org_blocked:
+            online = [c for c in online if c.id.startswith("os-") or c.file_id]
+        candidates += online
         for candidate in candidates:
             self._meta[candidate.id] = candidate
         candidates.sort(
@@ -357,6 +372,7 @@ class SubtitleService:
                 machine_translated=machine,
                 downloads=attrs.get("download_count") or 0,
                 fps=attrs.get("fps") or None,
+                file_id=files[0].get("file_id"),
             )
         for sub in org_items:
             candidate_id = f"org-{sub.id_subtitle}"
@@ -380,12 +396,56 @@ class SubtitleService:
 
     # -- fetch ------------------------------------------------------------------
 
-    def cues(self, candidate_id: str) -> list[tuple[float, float]]:
-        """(start, end) in seconds of every cue of a subtitle."""
+    def cues(self, candidate_id: str) -> list[tuple[float, float, str]]:
+        """(start, end, text) of every cue of a subtitle, times in seconds."""
         return [
-            (start / 1000, end / 1000)
-            for start, end, _ in parse_cues(self.get_vtt(candidate_id))
+            (start / 1000, end / 1000, text)
+            for start, end, text in parse_cues(self.get_vtt(candidate_id))
         ]
+
+    def translated_vtt(
+        self, candidate_id: str, target: str, engine: str, translator
+    ) -> str:
+        """The subtitle machine-translated into `target`, cached like the original."""
+        cache_path = os.path.join(
+            self.cache_dir,
+            hashlib.sha1(f"{candidate_id}|{target}|{engine}".encode()).hexdigest()
+            + ".vtt",
+        )
+        if os.path.exists(cache_path):
+            with open(cache_path, encoding="utf-8") as f:
+                return f.read()
+        cues = parse_cues(self.get_vtt(candidate_id))
+        texts = translator.translate([text for _, _, text in cues], target, engine)
+        out = ["WEBVTT", ""]
+        for (start, end, _), text in zip(cues, texts, strict=True):
+            out += [f"{_vtt_time(start)} --> {_vtt_time(end)}", text, ""]
+        vtt = "\n".join(out)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write(vtt)
+        return vtt
+
+    def _download_org(self, id_subtitle: int, meta: SubtitleCandidate | None) -> bytes:
+        """OpenSubtitles.org first (no quota); the same file via the .com API if refused."""
+        fallback = meta.file_id if meta and meta.file_id and self.api.enabled else None
+        if not self.org_blocked:
+            try:
+                return self.org.download(id_subtitle)
+            except Exception as e:  # bot check, limit, network
+                if "within.website" in str(e) or "captcha" in str(e).lower():
+                    logger.warning(
+                        "OpenSubtitles.org asks for a bot check: using the API for an hour"
+                    )
+                    self._org_blocked_until = time.monotonic() + 3600
+                if not fallback:
+                    raise
+        if not fallback:
+            raise RuntimeError("OpenSubtitles.org downloads are blocked right now")
+        return self.api.download(fallback)
+
+    def language_of(self, candidate_id: str) -> str | None:
+        meta = self._meta.get(candidate_id)
+        return meta.language if meta else None
 
     def get_vtt(self, candidate_id: str) -> str:
         """Return the subtitle as WebVTT, downloading and caching it on first use."""
@@ -402,7 +462,7 @@ class SubtitleService:
         language = meta.language if meta else None
         kind, _, rest = candidate_id.partition("-")
         if kind == "org":
-            raw = self.org.download(int(rest))
+            raw = self._download_org(int(rest), meta)
         elif kind == "os":
             if not self.api.enabled:
                 raise RuntimeError("OpenSubtitles API není nakonfigurováno")
