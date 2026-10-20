@@ -176,7 +176,7 @@
     subsMissing: "translate",
     translator: "google", // or "ai" (needs the AI subtitles key)
     aiTarget: "en", // AI subtitles: translate into this language ("" = as spoken)
-    aiVia: "auto", // "english": Whisper translates into English, Google into the target; "direct"
+    aiVia: "english", // Whisper translates the speech into English, Google into the target; or "direct"
     volume: 1,
     muted: false,
   };
@@ -250,7 +250,7 @@
     settingsForm.subsMissing.value = current.subsMissing;
     settingsForm.translator.value = current.translator;
     if (settingsForm.aiTarget) settingsForm.aiTarget.value = current.aiTarget;
-    if (settingsForm.aiVia) settingsForm.aiVia.value = current.aiVia;
+    if (settingsForm.aiVia) settingsForm.aiVia.value = current.aiVia === "direct" ? "direct" : "english";
     const saved = document.getElementById("settings-saved");
     settingsForm.addEventListener("change", () => {
       SF.settings.set({

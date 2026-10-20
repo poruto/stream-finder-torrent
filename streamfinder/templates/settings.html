@@ -90,7 +90,7 @@
           <div class="setting-row">
             <label for="ai-via">{{ t('ai_via') }}</label>
             <select id="ai-via" name="aiVia">
-              {% for value in ['auto', 'english', 'direct'] %}<option value="{{ value }}">{{ t('ai_via_' ~ value) }}</option>{% endfor %}
+              {% for value in ['english', 'direct'] %}<option value="{{ value }}">{{ t('ai_via_' ~ value) }}</option>{% endfor %}
             </select>
           </div>
           <p class="muted">{{ t('ai_via_help') }}</p>

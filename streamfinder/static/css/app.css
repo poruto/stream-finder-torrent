@@ -1528,6 +1528,48 @@ select option:checked {
 .subs-options > .subs-option:first-child + .subs-group {
   border-top: 0;
 }
+.subs-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin-top: 10px;
+  padding: 10px 8px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.subs-section-ai {
+  border-color: rgba(229, 9, 20, 0.45);
+  background: rgba(229, 9, 20, 0.06);
+}
+.subs-section-head {
+  display: grid;
+  gap: 2px;
+  padding: 2px 4px 6px;
+}
+.subs-section-head strong {
+  font-size: 15px;
+}
+.subs-section-head small {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.subs-section .subs-group:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+}
+.subs-ai-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px 10px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.subs-ai-target {
+  max-width: 60%;
+}
+
 .flag {
   flex: none;
   width: 24px;

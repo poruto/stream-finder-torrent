@@ -52,42 +52,6 @@ MAX_WINDOW = 60  # seconds of audio per request
 # to the window it starts in, so nothing is cut in half or shown twice.
 OVERLAP = 3.0
 LEAD = 0.25  # Whisper starts lines a little before the voice does
-# Languages small Whisper models write poorly but translate into English well:
-# "auto" goes audio -> English (Whisper) -> target (Google) for these.
-VIA_ENGLISH = {
-    "ja",
-    "ko",
-    "zh",
-    "yue",
-    "th",
-    "vi",
-    "ar",
-    "he",
-    "fa",
-    "hi",
-    "ur",
-    "bn",
-    "ta",
-    "te",
-    "ml",
-    "kn",
-    "mr",
-    "gu",
-    "pa",
-    "km",
-    "lo",
-    "my",
-    "si",
-    "ka",
-    "hy",
-    "am",
-    "mn",
-    "id",
-    "ms",
-    "tl",
-    "jw",
-    "su",
-}
 READING_SPEED = 0.07  # seconds per character a line stays up at most (+1.2 s)
 CACHE_SIZE = 600  # windows kept in memory (a 2 h film in 30 s windows is 240)
 
@@ -354,7 +318,7 @@ class Transcriber:
         translate_to: str = "",
         language: str = "",
         engine: str = "google",
-        via: str = "auto",
+        via: str = "english",
     ) -> dict:
         """Subtitle lines for [start, start + duration) of the file, cached."""
         duration = max(5.0, min(float(duration), MAX_WINDOW))
@@ -412,11 +376,14 @@ class Transcriber:
         ):  # nothing decodable in this window (end of file, bad data)
             return {"lines": [], "language": language or None, "translated": False}
         # Through English: Whisper translates the speech itself, Google does the rest.
+        # Route: Whisper turns the speech into English itself ("translate" task),
+        # Google then translates the English into the target language. Straight
+        # transcription only when nothing needs translating: no target, or the
+        # film is already spoken in the target language (or in English).
         english_first = (
-            translate_to
-            and language
-            and language not in ("en", translate_to)
-            and (via == "english" or (via == "auto" and language in VIA_ENGLISH))
+            bool(translate_to)
+            and via != "direct"
+            and language not in (translate_to, "en")
         )
         data = None
         if english_first:
@@ -427,7 +394,14 @@ class Transcriber:
         if data is None:
             english_first = False
             data = self.transcribe(audio, language)
-        spoken = language or _language_code((data.get("language") or "").lower())
+        reported = data.get("detected_language") or (
+            "" if english_first else data.get("language")
+        )
+        spoken = language or _language_code(str(reported or "").lower())
+        if english_first and spoken in (translate_to, "en"):
+            # Turned out the film speaks the target language (or English): use the words as said.
+            english_first = False
+            data = self.transcribe(audio, spoken)
         detected = "en" if english_first else spoken
         lines = clean_segments(
             data.get("segments") or [],

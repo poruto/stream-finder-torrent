@@ -1596,6 +1596,9 @@
   // "Interstellar.2014.1080p.BluRay.x264-YIFY" -> "Interstellar 2014 1080p BluRay x264 YIFY"
   const readableRelease = (name) => (name || "").replace(/\.(srt|sub|ass|vtt)$/i, "").replace(/[._-]+/g, " ").trim();
 
+  // Target languages for AI subtitles (Google Translate handles all of these).
+  const AI_LANGUAGES = ["cs", "sk", "en", "de", "pl", "hu", "fr", "es", "it", "pt", "nl", "ru", "uk", "hr", "ro", "sv", "da", "fi", "no", "tr", "ja", "ko", "zh"];
+
   // Which language list is open under "All subtitles".
   let subsTab = null;
 
@@ -1648,20 +1651,15 @@
         recommended.push(option(active?.id === tr.id, mine, t("subs_translated_from", { lang: languageName(mine), from: languageName(from.language) }), t(`translator_${translatorEngine()}`), pick(tr)));
       }
     }
-    if (state.aiAvailable) {
-      const target = settings.aiTarget ?? "en";
-      const ai = aiCandidate(target);
-      recommended.push(option(active?.id === ai.id, target, target ? t("subs_ai_into", { lang: languageName(target) }) : t("subs_ai_original"), t("subs_ai_help"), () => applySubtitle(ai), "AI"));
-      if (target) {
-        const spoken = aiCandidate("");
-        recommended.push(option(active?.id === spoken.id, "", t("subs_ai_original"), t("subs_ai_original_help"), () => applySubtitle(spoken), "AI"));
-      }
-    }
-    if (recommended.length) options.push(heading(t("subs_recommended")), ...recommended);
+    // -- section 1: real subtitles you can download (and their machine translation)
+    const downloads = el("section", { className: "subs-section" }, [
+      el("div", { className: "subs-section-head" }, [el("strong", {}, [t("subs_section_downloads")]), el("small", {}, [t("subs_section_downloads_help")])]),
+    ]);
+    if (recommended.length) downloads.append(heading(t("subs_recommended")), ...recommended);
 
     // -- every subtitle, one language at a time
     if (languages.length) {
-      options.push(heading(t("subs_all")));
+      downloads.append(heading(t("subs_all")));
       if (!languages.includes(subsTab)) subsTab = active && byLanguage.has(active.language) && !active.translatedFrom ? active.language : languages[0];
       const bar = el("div", { className: "subs-tabs", role: "tablist" });
       for (const code of languages) {
@@ -1676,7 +1674,7 @@
         });
         bar.append(tab);
       }
-      options.push(bar);
+      downloads.append(bar);
       const subs = byLanguage.get(subsTab);
       const rows = subs.map((c, i) => option(active?.id === c.id, "", readableRelease(c.release) || t("subs_version_n", { n: i + 1 }), sourceText(c), pick(c)));
       if (subsTab !== mine) {
@@ -1688,9 +1686,38 @@
       const shown = Math.max(5, current + 1);
       const list = el("div", { className: "subs-list" }, rows.slice(0, shown));
       if (rows.length > shown) list.append(el("details", { className: "subs-more" }, [el("summary", {}, [t("subs_more", { n: rows.length - shown })]), ...rows.slice(shown)]));
-      options.push(list);
-    } else if (!state.aiAvailable) {
-      options.push(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
+      downloads.append(list);
+    } else {
+      downloads.append(el("p", { className: "muted subs-help" }, [t("subs_not_found")]));
+    }
+    options.push(downloads);
+
+    // -- section 2: AI subtitles written from the audio, translated into a language picked here
+    if (state.aiAvailable) {
+      const target = settings.aiTarget ?? "en";
+      const select = el("select", { className: "subs-ai-target", "aria-label": t("ai_target") }, [
+        el("option", { value: "" }, [t("ai_target_none")]),
+        ...AI_LANGUAGES.map((code) => el("option", { value: code }, [languageName(code)])),
+      ]);
+      select.value = target;
+      select.addEventListener("change", () => {
+        SF.settings.set({ aiTarget: select.value });
+        // Already showing AI subtitles: switch them to the new language right away.
+        if (state.activeSub?.source === "ai") applySubtitle(aiCandidate(select.value));
+        else renderSubsMenu();
+      });
+      const ai = aiCandidate(target);
+      const spoken = aiCandidate("");
+      const section = el("section", { className: "subs-section subs-section-ai" }, [
+        el("div", { className: "subs-section-head" }, [
+          el("strong", {}, [t("subs_section_ai")]),
+          el("small", {}, [t("subs_section_ai_help")]),
+        ]),
+        el("label", { className: "subs-ai-row" }, [el("span", {}, [t("ai_target")]), select]),
+        option(active?.id === ai.id, target, target ? t("subs_ai_into", { lang: languageName(target) }) : t("subs_ai_original"), target ? t("subs_ai_route", { lang: languageName(target) }) : t("subs_ai_original_help"), () => applySubtitle(ai), "AI"),
+      ]);
+      if (target) section.append(option(active?.id === spoken.id, "", t("subs_ai_original"), t("subs_ai_original_help"), () => applySubtitle(spoken), "AI"));
+      options.push(section);
     }
     $("subs-options").replaceChildren(...options);
     $("subs-autosync").disabled = !active || active.source === "ai";
@@ -1838,7 +1865,7 @@
       audio: String(current.audioTrack || 0),
       translate: ai.candidate.translate || "",
       engine: translatorEngine(),
-      via: SF.settings.get().aiVia || "auto",
+      via: SF.settings.get().aiVia === "direct" ? "direct" : "english",
       language: ai.spoken || "",
     });
     let retryIn = 0;
