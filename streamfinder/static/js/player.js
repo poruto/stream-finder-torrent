@@ -1001,6 +1001,7 @@
     }
     if (!info.available || !info.probed) return null;
     current.probe = info;
+    checkRuntime(current, info.duration);
     const track = preferredAudio(info.audio || []);
     current.audioTrack = track;
     const chosen = (info.audio || [])[track];
@@ -1157,6 +1158,7 @@
     // seek the next one too.
     video.removeEventListener("loadedmetadata", state.onMetadata);
     state.onMetadata = () => {
+      if (!converted()) checkRuntime(state.current, video.duration);
       if (startAt > 0 && (converted() || startAt < video.duration - 10)) video.currentTime = startAt;
     };
     video.addEventListener("loadedmetadata", state.onMetadata, { once: true });
@@ -1524,6 +1526,33 @@
     } finally {
       state.switching = false;
     }
+  }
+
+  // ============================================================= wrong film detection
+  // A file far shorter or longer than the film's runtime on TMDB is another film with
+  // the same name, a sample or a TV cut: an automatic pick moves on to the next version.
+  // Loose on purpose - extended editions run up to ~1.5x the theatrical cut.
+  const RUNTIME_MIN = 0.6;
+  const RUNTIME_MAX = 1.6;
+
+  async function checkRuntime(current, seconds) {
+    const minutes = current?.target?.runtime;
+    if (!current || current.runtimeChecked || ctx.media_type !== "movie" || !minutes) return;
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    current.runtimeChecked = true;
+    const ratio = seconds / (minutes * 60);
+    if (!current.auto || (ratio >= RUNTIME_MIN && ratio <= RUNTIME_MAX)) return;
+    let data;
+    try {
+      data = await findVersions(current.target);
+    } catch {
+      return;
+    }
+    if (current !== state.current) return;
+    const next = data.results.find((v) => !state.tried.has(v.hash) && v.hash !== current.hash && !v.low && !v.oversized);
+    if (!next) return;
+    toast(t("wrong_runtime", { found: Math.round(seconds / 60), expected: minutes }));
+    play(current.target, { torrent: next, resume: false, auto: true });
   }
 
   // ============================================================= silent video detection

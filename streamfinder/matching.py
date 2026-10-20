@@ -324,11 +324,27 @@ class ReleaseInfo:
         return None
 
 
+def _name_part(raw: str) -> str:
+    """The part of a name that describes the release.
+
+    A path gives its file name; "Duna / Dune (2021)" the part with the year; and
+    "Dune Part One 2021 1080p EN/ITA" must not be cut down to "ITA".
+    """
+    parts = [p.strip() for p in raw.replace("\\", "/").split("/") if p.strip()]
+    if len(parts) < 2:
+        return parts[0] if parts else ""
+    if split_extension(parts[-1])[1]:
+        return parts[-1]
+    for part in reversed(parts):
+        if _YEAR_RE.search(part):
+            return part
+    return max(parts, key=len)
+
+
 def parse_release(name: str) -> ReleaseInfo:
     """Parse a scene-style release / file name into a ReleaseInfo."""
     raw = name or ""
-    base = raw.replace("\\", "/").split("/")[-1]
-    base, _ = split_extension(base)
+    base, _ = split_extension(_name_part(raw))
     base = _LEADING_TAG_RE.sub("", base)
     info = ReleaseInfo(raw=raw)
 

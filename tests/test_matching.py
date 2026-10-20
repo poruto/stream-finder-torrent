@@ -311,3 +311,9 @@ def test_tmdb_namesakes(monkeypatch):
     monkeypatch.setattr(client, "_get", lambda *a, **k: {"results": results})
     assert client.has_namesake("movie", 438631, ["Dune"])
     assert not client.has_namesake("movie", 693134, ["Dune: Part Two"])
+
+
+def test_slash_in_name_keeps_the_part_with_the_year():
+    assert parse_release("Dune Part One (2021) 1080p BluRay EN/ITA").year == 2021
+    assert parse_release("Duna / Dune (2021) CZ dabing").title == "dune"
+    assert parse_release("Show/Season 1/Show.S01E02.1080p.mkv").episodes == [2]
