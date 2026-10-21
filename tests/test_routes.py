@@ -667,6 +667,36 @@ def test_subtitle_download_failure_is_502(client, svc, monkeypatch):
     assert client.get("/api/subtitles/os-1.vtt").status_code == 502
 
 
+def test_translated_subtitle_window(client, svc, monkeypatch):
+    asked = []
+
+    def window(cid, target, engine, translator, start, duration):
+        asked.append((cid, target, engine, start, duration))
+        return [{"start": 61.0, "end": 62.0, "text": "Ahoj"}]
+
+    monkeypatch.setattr(svc.subtitles, "translated_window", window)
+    response = client.get(
+        "/api/subtitles/os-1/translated?translate=cs&engine=ai&start=60&duration=60"
+    )
+    assert response.get_json() == {
+        "success": True,
+        "lines": [{"start": 61.0, "end": 62.0, "text": "Ahoj"}],
+    }
+    assert asked == [("os-1", "cs", "ai", 60.0, 60.0)]
+    assert client.get("/api/subtitles/os-1/translated").status_code == 400
+
+
+def test_translated_window_failures(client, svc, monkeypatch):
+    assert client.get("/api/subtitles/x/translated?translate=cs").status_code == 404
+
+    def down(*args):
+        raise RuntimeError("daily limit")
+
+    monkeypatch.setattr(svc.subtitles, "translated_window", down)
+    response = client.get("/api/subtitles/os-1/translated?translate=cs")
+    assert response.status_code == 502 and response.get_json()["error"] == "daily limit"
+
+
 def test_ai_subtitles_when_switched_off(client):
     response = client.get(f"/api/subtitles/ai/{HASH}/0")
     assert response.status_code == 501 and response.get_json()["success"] is False

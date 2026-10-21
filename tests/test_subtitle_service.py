@@ -362,6 +362,32 @@ def test_translated_subtitle_is_cached_per_language_and_engine(make_service):
     assert translator.calls == [("de", "google"), ("de", "ai"), ("fr", "google")]
 
 
+def test_translated_window_has_only_the_lines_starting_in_it(make_service):
+    files = [TorrentFile(1, "Movie.srt", 100)]
+    svc = make_service(files, {1: SRT.encode()})
+
+    class Translator:
+        calls = []
+
+        def translate(self, texts, target, engine, patience):
+            self.calls.append((texts, engine, patience))
+            return [f"{target}:{t}" for t in texts]
+
+    translator = Translator()
+    window = svc.translated_window(f"tor-{HASH}-1", "cs", "ai", translator, 2.5, 60)
+    assert window == [
+        {"start": 3.0, "end": 4.0, "text": "cs:Světe &amp; spol."}
+    ]  # cue text, as in the .vtt
+    assert (
+        svc.translated_window(f"tor-{HASH}-1", "cs", "ai", translator, 2.5, 60)
+        == window
+    )
+    assert translator.calls == [
+        (["Světe &amp; spol."], "ai", 20)
+    ]  # the second one: cached
+    assert svc.translated_window(f"tor-{HASH}-1", "cs", "ai", translator, 60, 60) == []
+
+
 def test_failed_translation_leaves_no_cache(make_service, tmp_path):
     files = [TorrentFile(1, "Movie.srt", 100)]
     svc = make_service(files, {1: SRT.encode()})
@@ -511,6 +537,24 @@ def test_ai_engine_failure_falls_back_to_google_for_that_batch(monkeypatch):
     )
     out = translator.translate([str(i) for i in range(50)], "cs", engine="ai")
     assert out[39] == "ai:39" and out[40] == "g:40" and len(out) == 50
+
+
+def test_ai_engine_asks_again_after_a_slip():
+    class Chat:
+        chat_available = True
+        calls = 0
+
+        def translate(self, batch, target):
+            self.calls += 1
+            if self.calls == 1:
+                raise TranscribeError(
+                    "translation returned a different number of lines"
+                )
+            return [f"ai:{t}" for t in batch]
+
+    chat = Chat()
+    assert Translator(chat).translate(["a"], "cs", engine="ai") == ["ai:a"]
+    assert chat.calls == 2
 
 
 def test_ai_engine_waits_out_the_rate_limit(monkeypatch):

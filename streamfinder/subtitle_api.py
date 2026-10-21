@@ -293,6 +293,32 @@ def _sync_by_speech(svc, url, cues, position):
     return confirm(result, align(cues, speech, (other, other + 120)))
 
 
+@subtitle_api.route("/subtitles/<candidate_id>/translated")
+def subtitle_translated_window(candidate_id: str):
+    """Machine-translated lines of one stretch of a subtitle, for the player to show
+    while it plays. Query: translate (language code), engine (google|ai), start,
+    duration (seconds of the subtitle's own timing). Returns {lines: [{start, end, text}]}."""
+    svc = services()
+    target = (request.args.get("translate") or "").lower()[:2]
+    if not (target.isalpha() and len(target) == 2):
+        return jsonify(success=False, error="translate: a language code"), 400
+    try:
+        lines = svc.subtitles.translated_window(
+            candidate_id,
+            target,
+            "ai" if request.args.get("engine") == "ai" else "google",
+            svc.translator,
+            max(0.0, request.args.get("start", 0, type=float)),
+            min(600.0, max(5.0, request.args.get("duration", 60, type=float))),
+        )
+    except ValueError as e:
+        return jsonify(success=False, error=str(e)), 404
+    except Exception as e:  # network / quota errors from providers
+        logger.warning("Subtitle %s translation failed: %s", candidate_id, e)
+        return jsonify(success=False, error=str(e)), 502
+    return jsonify(success=True, lines=lines)
+
+
 @subtitle_api.route("/subtitles/<candidate_id>.vtt")
 def subtitle_vtt(candidate_id: str):
     """A subtitle as WebVTT; ?translate=cs&engine=google|ai for a machine translation."""

@@ -7,7 +7,7 @@
 //   core.js          state, targets, versions, the player shell, playback, self-healing
 //   controls.js      menus, audio tracks, timeline, volume, media keys, fullscreen, keyboard
 //   subtitles.js     finding, loading and timing subtitles, their menu and the sync
-//   ai-subtitles.js  subtitles written from the audio on the server
+//   ai-subtitles.js  subtitles written from the audio, or AI-translated, a window at a time
 //   sheet.js         the versions sheet
 //   page.js          hero, My list, the episode lists - and the start
 // What earlier files put in SF.player is used directly; functions of later files through

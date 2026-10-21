@@ -41,9 +41,15 @@ class Translator:
         )
 
     def translate(
-        self, lines: list[str], target: str, engine: str = "google"
+        self,
+        lines: list[str],
+        target: str,
+        engine: str = "google",
+        patience: float = AI_PATIENCE,
     ) -> list[str]:
-        """One translated line per input line (line breaks inside a line become spaces)."""
+        """One translated line per input line (line breaks inside a line become spaces).
+
+        `patience`: seconds the AI engine waits out its rate limit before Google steps in."""
         lines = [" ".join(line.split()) for line in lines]
         if not lines:
             return []
@@ -51,7 +57,7 @@ class Translator:
             if not self.transcriber or not self.transcriber.chat_available:
                 raise TranslateError("AI translation needs a Groq or OpenAI key")
             batches = [lines[i : i + AI_BATCH] for i in range(0, len(lines), AI_BATCH)]
-            deadline = time.monotonic() + AI_PATIENCE
+            deadline = time.monotonic() + patience
             work = lambda batch: self._ai(batch, target, deadline)
         else:
             batches = _batches(lines, GOOGLE_BATCH)
@@ -67,6 +73,7 @@ class Translator:
     def _ai(self, lines: list[str], target: str, deadline: float) -> list[str]:
         """The chat model's translation, waiting out its rate limit until `deadline`;
         Google's when the model fails, so one bad batch doesn't lose the whole file."""
+        retried = False
         while True:
             try:
                 return self.transcriber.translate(lines, target)
@@ -74,6 +81,10 @@ class Translator:
                 wait = e.retry_after if e.status == 429 else None
                 if wait is not None and time.monotonic() + wait < deadline:
                     time.sleep(wait)
+                    continue
+                if e.status == 502 and not retried:
+                    # The model now and then drops or merges a line: ask once more.
+                    retried = True
                     continue
                 logger.warning(
                     "AI translation failed (%s): Google Translate for %d lines",

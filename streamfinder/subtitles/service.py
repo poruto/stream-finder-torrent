@@ -14,6 +14,7 @@ service / edition), popularity and quality flags.
 
 import contextlib
 import hashlib
+import json
 import logging
 import math
 import os
@@ -52,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"os-\d+|org-\d+|tor-[a-f0-9]{40}-\d+")
 META_SIZE = 3000  # candidates remembered (a search returns up to a few hundred)
+# A translated window is being waited for by someone watching: wait out a rate limit
+# only this long, then Google translates it.
+WINDOW_PATIENCE = 20
 
 
 @dataclass
@@ -440,6 +444,44 @@ class SubtitleService:
             vtt = "\n".join(out)
             self._write_cache(cache_path, vtt)
         return vtt
+
+    def translated_window(
+        self,
+        candidate_id: str,
+        target: str,
+        engine: str,
+        translator,
+        start: float,
+        duration: float,
+    ) -> list[dict]:
+        """The lines starting in [start, start + duration) s, machine-translated into
+        `target`: the player asks for the stretch being watched instead of waiting
+        minutes for the whole film (AI translation runs into the account's rate limit)."""
+        cache_path = os.path.join(
+            self.cache_dir,
+            hashlib.sha1(
+                f"{candidate_id}|{target}|{engine}|{start:g}|{duration:g}".encode()
+            ).hexdigest()
+            + ".json",
+        )
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return json.loads(cached)
+        cues = self.cues(candidate_id)  # before the lock: downloading takes its own
+        with self._writing.hold(cache_path):
+            cached = self._read_cache(cache_path)
+            if cached is not None:
+                return json.loads(cached)
+            cues = [cue for cue in cues if start <= cue[0] < start + duration]
+            texts = translator.translate(
+                [text for _, _, text in cues], target, engine, patience=WINDOW_PATIENCE
+            )
+            lines = [
+                {"start": s, "end": e, "text": text}
+                for (s, e, _), text in zip(cues, texts, strict=True)
+            ]
+            self._write_cache(cache_path, json.dumps(lines, ensure_ascii=False))
+        return lines
 
     @staticmethod
     def _read_cache(path: str) -> str | None:

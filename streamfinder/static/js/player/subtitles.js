@@ -10,7 +10,7 @@
     ctx, $, progressKey, video, state, clearTimer, setTimer, toast, converted, pos,
   } = P; // core.js
   const { episodesBtn, episodesMenu, toggleMenu, languageNames } = P; // controls.js
-  const { startAiSubtitles } = P.later; // ai-subtitles.js
+  const { startAiSubtitles, startTranslatedSubtitles } = P.later; // ai-subtitles.js
 
   // ============================================================= subtitles
 
@@ -259,6 +259,11 @@
       return;
     }
     if (candidate.source === "ai") return startAiSubtitles(candidate);
+    if (candidate.engine === "ai") {
+      // Translated a stretch at a time while it plays (the whole film takes minutes).
+      await startTranslatedSubtitles(candidate);
+      return syncWhenPlaying(candidate);
+    }
     subsLabel.textContent = candidate.translatedFrom ? t("subs_translating") : `${candidate.language_name}…`;
     // Another pick, "Off" or another episode meanwhile aborts this one (clearTracks).
     const request = (state.subRequest = new AbortController());
@@ -290,16 +295,7 @@
       state.subSync = null;
       state.subSyncChecks = [];
       subsLabel.textContent = candidate.language_name;
-      // Subtitles from the torrent or matched by file hash are made for this file;
-      // everything else gets aligned to the speech once playback has started.
-      if (candidate.source !== "torrent" && !candidate.hash_match) {
-        const whenPlaying = () => {
-          if (current !== state.current || candidate !== state.activeSub) return;
-          if (video.paused || pos() < 5) return setTimer("subsync", whenPlaying, 3000);
-          syncSubtitles();
-        };
-        setTimer("subsync", whenPlaying, 4000);
-      }
+      syncWhenPlaying(candidate);
     } catch {
       if (outdated()) return; // aborted or replaced: nothing to fall back for
       const alternatives = state.subs.filter(
@@ -310,6 +306,19 @@
       subsLabel.textContent = t("subs_failed");
     }
     renderSubsMenu();
+  }
+
+  // Subtitles from the torrent or matched by file hash are made for this file;
+  // everything else gets aligned to the speech once playback has started.
+  function syncWhenPlaying(candidate) {
+    if (candidate.source === "torrent" || candidate.hash_match) return;
+    const current = state.current;
+    const whenPlaying = () => {
+      if (current !== state.current || candidate !== state.activeSub) return;
+      if (video.paused || pos() < 5) return setTimer("subsync", whenPlaying, 3000);
+      syncSubtitles();
+    };
+    setTimer("subsync", whenPlaying, 4000);
   }
 
   // Cue time = original mapped by the automatic sync + the user's manual offset,
@@ -345,6 +354,15 @@
     return a + ((t - p.end) / (q.start - p.end)) * (at(q, q.start) - a);
   }
 
+  // File time -> subtitle time: placeCue the other way round (the pieces are nearly 1:1,
+  // a few steps get within a fraction of a second).
+  function subtitleTime(time) {
+    const target = time - state.subOffset;
+    let x = target;
+    for (let i = 0; i < 4; i += 1) x += target - mapTime(x);
+    return x;
+  }
+
   // ------------------------------------------------------------- languages and candidates
 
   const languageName = (code) => {
@@ -365,6 +383,7 @@
     id: `${c.id}|${target}`,
     syncId: c.id, // the original text is what matches the speech
     url: `/api/subtitles/${c.id}.vtt?translate=${target}&engine=${translatorEngine()}`,
+    engine: translatorEngine(),
     language: target,
     language_name: `${languageName(target)} (${t("subs_machine")})`,
     translatedFrom: c.language,
@@ -538,6 +557,6 @@
   // For the other player files.
   Object.assign(P, {
     subsLabel, clearTracks, titlePrefs, rememberPref, loadSubtitles, renderSubsMenu, applySubtitle,
-    applyOffset, placeCue, translatorEngine, shiftSubtitles,
+    applyOffset, placeCue, subtitleTime, translatorEngine, shiftSubtitles,
   });
 })();

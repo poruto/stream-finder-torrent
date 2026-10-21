@@ -140,7 +140,7 @@
     toast(t("audio_switching", { name: audioLabel(track, index).name }));
     $("player-buffering").hidden = false;
     startConverted(pos(), { copyAudio: Boolean(track.browser_ok), audio: index });
-    if (state.ai) {
+    if (state.activeSub?.source === "ai") {
       // The transcript belongs to the old track.
       applySubtitle(state.activeSub);
     }
