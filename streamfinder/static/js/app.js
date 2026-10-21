@@ -642,6 +642,8 @@
     track.addEventListener("scroll", () => queueCarousel(row), {
       passive: true,
     });
+    // Rows drawn in JS (Continue watching, My list) change their cards after this.
+    new MutationObserver(() => queueCarousel(row)).observe(track, { childList: true });
     carousels.add(row);
     queueCarousel(row);
   };

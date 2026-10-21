@@ -25,13 +25,17 @@
     <section class="row" id="continue-row" hidden>
       <h2 class="row-title">{{ t('continue_watching') }}</h2>
       <div class="row-viewport">
+        <button class="row-arrow prev" type="button" aria-label="{{ t('scroll_back') }}" hidden><svg class="icon"><use href="#i-back"/></svg></button>
         <div class="row-track row-track-wide" id="continue-track"></div>
+        <button class="row-arrow next" type="button" aria-label="{{ t('scroll_forward') }}" hidden><svg class="icon"><use href="#i-next"/></svg></button>
       </div>
     </section>
     <section class="row" id="mylist-row" hidden>
       <h2 class="row-title">{{ t('my_list') }}</h2>
       <div class="row-viewport">
+        <button class="row-arrow prev" type="button" aria-label="{{ t('scroll_back') }}" hidden><svg class="icon"><use href="#i-back"/></svg></button>
         <div class="row-track" id="mylist-track"></div>
+        <button class="row-arrow next" type="button" aria-label="{{ t('scroll_forward') }}" hidden><svg class="icon"><use href="#i-next"/></svg></button>
       </div>
     </section>
     <div class="rows-group" id="because-rows"></div>
