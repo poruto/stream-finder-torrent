@@ -5,10 +5,12 @@
 * APIBay       The Pirate Bay JSON API; many uploads are tagged with an IMDb id
 * Knaben       meta-search over 1337x, TPB, RARBG archive, Nyaa and others
 * Torrents-CSV DHT-crawled index with live seeder counts
+* Torrentio    the Stremio add-on's index, looked up by IMDb id (exact), episodes included
 """
 
 import contextlib
 import logging
+import re
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -19,7 +21,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ..matching import parse_size
+from ..matching import pack_kind, parse_release, parse_size
 
 logger = logging.getLogger(__name__)
 
@@ -318,3 +320,53 @@ class TorrentsCSVProvider(Provider):
             ]
 
         return self.each_query(query.text_queries(), fetch)
+
+
+class TorrentioProvider(Provider):
+    """Stremio add-on protocol: /stream/movie/<imdb>.json, /stream/series/<imdb>:<s>:<e>.json.
+
+    A stream's title is the torrent name, for a file inside a pack the file name on the
+    next line, then a line like "👤 84 💾 22.9 GB ⚙️ ThePirateBay".
+    """
+
+    name = "Torrentio"
+    health_check = ("/manifest.json", {})
+    _stats = re.compile(r"👤\s*(\d+)")
+    _size = re.compile(r"💾\s*([\d.,]+\s*[KMGT]i?B)")
+
+    def search(self, query) -> list[RawTorrent]:
+        if not query.imdb_id or query.free_text:
+            return []
+        if query.media_type == "movie":
+            path = f"/stream/movie/{query.imdb_id}.json"
+        elif query.season is not None:
+            # A whole season: the packs and episodes that hold its first episode.
+            episode = query.episode if query.episode is not None else 1
+            path = f"/stream/series/{query.imdb_id}:{query.season}:{episode}.json"
+        else:
+            return []
+        results = []
+        for stream in self.request(path).get("streams") or []:
+            lines = (stream.get("title") or "").splitlines()
+            if not stream.get("infoHash") or not lines:
+                continue
+            stats = next((line for line in lines if "👤" in line), "")
+            seeders = self._stats.search(stats)
+            size = parse_size(m.group(1)) if (m := self._size.search(stats)) else 0
+            # The size is that of the file: for a pack it would read as a tiny pack.
+            info = parse_release(lines[0])
+            if pack_kind(info) or len(info.episodes) > 1:
+                size = 0
+            results.append(
+                RawTorrent(
+                    name=lines[0].strip(),
+                    info_hash=stream["infoHash"].lower(),
+                    size=size,
+                    seeders=int(seeders.group(1)) if seeders else 0,
+                    leechers=0,
+                    provider=self.name,
+                    id_match=True,
+                    imdb=query.imdb_id,
+                )
+            )
+        return results

@@ -12,7 +12,7 @@ on your network (TV, phone, laptop). English and Czech.
 
 What it does for you:
 
-- searches YTS, EZTV, The Pirate Bay, Knaben, Torrents-CSV and SkTorrent at once and
+- searches YTS, EZTV, The Pirate Bay, Knaben, Torrents-CSV, Torrentio and SkTorrent at once and
   picks the release that will actually play: the right film (remakes and same-name
   shows told apart by year and IMDb id), the right episode, a sensible size, no cam
   rips, no AI upscales - or the smallest good one with *Data saver*

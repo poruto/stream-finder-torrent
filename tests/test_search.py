@@ -13,6 +13,7 @@ from streamfinder.torrents.providers import (
     KnabenProvider,
     Provider,
     RawTorrent,
+    TorrentioProvider,
     TorrentsCSVProvider,
     YTSProvider,
     same_imdb,
@@ -325,6 +326,103 @@ def test_torrents_csv_lowercases_hashes():
     )
     found = provider.search(SearchQuery(title="dune", titles=["dune"], free_text=True))
     assert [r.info_hash for r in found] == ["d" * 40]
+
+
+def torrentio(name, letter, stats, file=None):
+    lines = [name, file, stats] if file else [name, stats]
+    return {
+        "name": "Torrentio\n1080p",
+        "title": "\n".join(lines),
+        "infoHash": letter * 40,
+    }
+
+
+def test_torrentio_reads_name_seeders_and_size_by_imdb_id():
+    data = {
+        "streams": [
+            torrentio("Dune.2021.1080p.WEB", "A", "👤 84 💾 2.5 GB ⚙️ ThePirateBay"),
+            torrentio("Dune 2021 720p", "b", "💾 900 MB ⚙️ 1337x"),
+            {"title": "no hash"},
+        ]
+    }
+    provider = provider_with(TorrentioProvider, {"https://tio.example": Response(data)})
+    query = SearchQuery(title="Dune", titles=["Dune"], imdb_id="tt1160419")
+    found = provider.search(query)
+    assert (
+        provider.session.calls[0][0]
+        == "https://tio.example/stream/movie/tt1160419.json"
+    )
+    assert [(r.name, r.info_hash, r.seeders) for r in found] == [
+        ("Dune.2021.1080p.WEB", "a" * 40, 84),
+        ("Dune 2021 720p", "b" * 40, 0),
+    ]
+    assert found[0].size == int(2.5 * GB) and found[0].id_match
+    assert found[0].imdb == "tt1160419"
+
+
+def test_torrentio_episode_path_and_no_file_size_for_packs():
+    data = {
+        "streams": [
+            torrentio(
+                "Breaking.Bad.S01.1080p.BluRay",
+                "c",
+                "👤 9 💾 1.2 GB ⚙️ TPB",
+                file="Breaking.Bad.S01E02.1080p.mkv",
+            ),
+            torrentio("Breaking.Bad.S01E02.720p.WEB", "d", "👤 3 💾 600 MB"),
+            torrentio(
+                "Breaking.Bad.S01E01-07.1080p.WEB",
+                "e",
+                "👤 5 💾 1.1 GB",
+                file="Breaking.Bad.S01E02.mkv",
+            ),
+        ]
+    }
+    provider = provider_with(TorrentioProvider, {"https://tio.example": Response(data)})
+    query = SearchQuery(
+        title="Breaking Bad",
+        titles=["Breaking Bad"],
+        media_type="tv",
+        season=1,
+        episode=2,
+        imdb_id="tt0903747",
+    )
+    found = provider.search(query)
+    assert provider.session.calls[0][0].endswith("/stream/series/tt0903747:1:2.json")
+    # The size shown is the episode file's, not the pack's.
+    assert [(r.name, r.size) for r in found] == [
+        ("Breaking.Bad.S01.1080p.BluRay", 0),
+        ("Breaking.Bad.S01E02.720p.WEB", 600 * 1024**2),
+        ("Breaking.Bad.S01E01-07.1080p.WEB", 0),
+    ]
+
+
+def test_torrentio_whole_season_asks_for_its_first_episode():
+    provider = provider_with(
+        TorrentioProvider, {"https://tio.example": Response({"streams": []})}
+    )
+    query = SearchQuery(
+        title="X", titles=["X"], media_type="tv", season=3, imdb_id="tt1"
+    )
+    provider.search(query)
+    assert provider.session.calls[0][0].endswith("/stream/series/tt1:3:1.json")
+
+
+def test_torrentio_needs_an_imdb_id_and_skips_free_text():
+    provider = provider_with(TorrentioProvider, {"https://tio.example": Response({})})
+    assert provider.search(SearchQuery(title="Dune", titles=["Dune"])) == []
+    free = SearchQuery(title="Dune", titles=["Dune"], imdb_id="tt1", free_text=True)
+    assert provider.search(free) == []
+    assert provider.session.calls == []
+
+
+def test_merged_duplicate_takes_the_size_another_index_knows():
+    query = SearchQuery(title="Dune", titles=["Dune"], year=2021, imdb_id="tt1160419")
+    found = [
+        raw("Dune 2021 1080p", "a", size=0, provider="Torrentio"),
+        raw("Dune 2021 1080p", "a", size=3 * GB, provider="TPB"),
+    ]
+    assert TorrentSearcher._rank(found, query)[0].raw.size == 3 * GB
 
 
 @pytest.mark.parametrize(
@@ -846,4 +944,10 @@ def test_real_providers_fail_cleanly_without_network(searcher):
         SearchQuery(title="Dune", titles=["Dune"], year=2021, imdb_id="tt1160419")
     )
     assert result["results"] == []
-    assert set(result["failed_providers"]) == {"YTS", "TPB", "Knaben", "Torrents-CSV"}
+    assert set(result["failed_providers"]) == {
+        "YTS",
+        "TPB",
+        "Knaben",
+        "Torrents-CSV",
+        "Torrentio",
+    }

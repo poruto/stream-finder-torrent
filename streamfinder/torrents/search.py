@@ -34,6 +34,7 @@ from .providers import (
     KnabenProvider,
     Provider,
     RawTorrent,
+    TorrentioProvider,
     TorrentsCSVProvider,
     YTSProvider,
     same_imdb,
@@ -426,6 +427,7 @@ class TorrentSearcher:
             APIBayProvider(config.APIBAY_MIRRORS, timeout),
             KnabenProvider(config.KNABEN_MIRRORS, timeout),
             TorrentsCSVProvider(config.TORRENTS_CSV_MIRRORS, timeout),
+            TorrentioProvider(config.TORRENTIO_MIRRORS, timeout),
         ]
         self.sktorrent = SkTorrentProvider(
             config.SKTORRENT_USERNAME, config.SKTORRENT_PASSWORD, timeout
@@ -498,6 +500,7 @@ class TorrentSearcher:
                 existing.id_match = existing.id_match or item.id_match
                 existing.magnet = existing.magnet or item.magnet
                 existing.imdb = existing.imdb or item.imdb
+                existing.size = existing.size or item.size
                 if item.provider not in providers:
                     providers.append(item.provider)
                 # YTS and SkTorrent names are rebuilt from structured data: better for parsing.

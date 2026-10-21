@@ -66,6 +66,7 @@ APIBAY_MIRRORS = _env_list("APIBAY_MIRRORS", "https://apibay.org")
 
 KNABEN_MIRRORS = _env_list("KNABEN_MIRRORS", "https://api.knaben.org")
 TORRENTS_CSV_MIRRORS = _env_list("TORRENTS_CSV_MIRRORS", "https://torrents-csv.com")
+TORRENTIO_MIRRORS = _env_list("TORRENTIO_MIRRORS", "https://torrentio.strem.fun")
 # SkTorrent (Czech/Slovak tracker, free account at https://sktorrent.eu): searched when set.
 SKTORRENT_USERNAME = os.getenv("SKTORRENT_USERNAME", "").strip()
 SKTORRENT_PASSWORD = os.getenv("SKTORRENT_PASSWORD", "").strip()
