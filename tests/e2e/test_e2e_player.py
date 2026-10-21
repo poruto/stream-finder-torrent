@@ -98,6 +98,38 @@ def test_close_button_leaves_no_player_history_entry(media_page):
     )
 
 
+def test_versions_open_in_full_screen_without_leaving_it(media_page):
+    page = media_page
+    start_movie(page)
+    page.locator("#ctl-fullscreen").click()
+    page.wait_for_function("document.fullscreenElement?.id === 'player'")
+    page.locator("#player-versions").click()
+    page.locator("#versions .sheet-panel").wait_for(state="visible")
+    # Only the full-screen element is drawn: the sheet opened inside it.
+    assert page.evaluate("document.fullscreenElement?.id") == "player"
+    assert page.evaluate("document.getElementById('versions').parentElement.id") == (
+        "player"
+    )
+    assert page.evaluate("document.getElementById('versions').inert") is False
+    assert page.evaluate("document.querySelector('.player-controls').inert") is True
+    page.locator("#versions .sheet-head [data-close]").click()
+    page.locator("#versions").wait_for(state="hidden")
+    assert page.evaluate("document.fullscreenElement?.id") == "player"
+    assert page.evaluate("document.querySelector('.player-controls').inert") is False
+
+    # Out of full screen and the player, the page's button opens it where it was.
+    page.evaluate("document.exitFullscreen()")
+    page.wait_for_function("!document.fullscreenElement")
+    page.locator("#player-close").click()
+    page.locator("#player").wait_for(state="hidden")
+    page.locator("#versions-btn").click()
+    page.locator("#versions .sheet-panel").wait_for(state="visible")
+    assert page.evaluate("document.getElementById('versions').parentElement.id") != (
+        "player"
+    )
+    assert page.evaluate("document.querySelector('main').inert") is True
+
+
 def test_player_fits_a_phone(media_phone):
     page = media_phone
     page.open(f"/movie/{fakes.MOVIE_ID}")

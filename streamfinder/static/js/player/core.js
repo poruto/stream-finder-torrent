@@ -217,10 +217,21 @@
   // or TV-remote focus there, Space doesn't press a hidden button), and on close focus
   // goes back where it was.
   const layers = []; // [{ node, returnFocus }], the topmost last
+  let inertNodes = [];
 
+  // Inert is everything but the top layer and its ancestors: the versions sheet can sit
+  // inside the full-screen player, and the player must not take it down with it.
   function updateInert() {
+    inertNodes.forEach((node) => (node.inert = false));
+    inertNodes = [];
     const top = layers.length ? layers[layers.length - 1].node : null;
-    for (const node of document.body.children) node.inert = Boolean(top) && node !== top;
+    for (let node = top; node && node !== document.body; node = node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node) continue;
+        sibling.inert = true;
+        inertNodes.push(sibling);
+      }
+    }
   }
   function openLayer(node, focusNode = node) {
     if (layers.some((layer) => layer.node === node)) return;

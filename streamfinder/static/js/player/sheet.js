@@ -15,6 +15,7 @@
   // ============================================================= versions sheet
 
   const sheet = $("versions");
+  const sheetHome = sheet.parentElement;
   let sheetTarget = null;
   let sheetSeq = 0; // latest search shown in the sheet (quality or query changed meanwhile)
 
@@ -42,7 +43,9 @@
   ) {
     const seq = ++sheetSeq;
     sheetTarget = target;
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    // Only the full-screen element is drawn: in full screen the sheet opens inside it.
+    const host = document.fullscreenElement || sheetHome;
+    if (sheet.parentElement !== host && sheet.hidden) host.append(sheet);
     const opening = sheet.hidden;
     sheet.hidden = false;
     if (opening) openLayer(sheet, sheet.querySelector(".sheet-panel"));
