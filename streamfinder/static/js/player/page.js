@@ -9,7 +9,7 @@
   const P = SF.player;
   const {
     ctx, $, isTV, progressKey, detailUrl, state, hasSeason, movieTarget, episodeTarget, targetKey,
-    shortLabel, isAired, findVersions, recommendedOf, qualityText, play,
+    shortLabel, isAired, findVersions, recommendedOf, qualityText, facts, play,
   } = P; // core.js
   const { episodesBtn, closeMenus, updatePlayButton, applyVolume } = P; // controls.js
   const { openSheet } = P; // sheet.js
