@@ -838,6 +838,18 @@ def open_window(url: str) -> None:
     webbrowser.open(url)
 
 
+def window_open() -> bool:
+    """Is an app window open? The browser holds its profile's lockfile until the last
+    window of the profile closes."""
+    try:
+        with open(os.path.join(WINDOW_PROFILE, "lockfile"), "rb"):
+            return False  # left behind by a crash, nobody holds it
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        return True
+
+
 def open_app(in_browser: bool = False) -> None:
     """Start (when stopped) and open the app: its own window, or a browser tab."""
     if not _supervisor():
@@ -858,6 +870,9 @@ TRAY_TEXT = {
         "up_to_date": "StreamFinder {version} is up to date.",
         "updating": "Installing the new version, StreamFinder restarts in a moment.",
         "update_failed": "The update failed - see cache/logs/supervisor.log.",
+        "close_question": "Quit StreamFinder completely?\n\n"
+        "No: it keeps running in the background - open it again from the icon "
+        "in the tray (bottom right).",
     },
     "cs": {
         "open": "Otevřít StreamFinder",
@@ -868,6 +883,8 @@ TRAY_TEXT = {
         "up_to_date": "StreamFinder {version} je aktuální.",
         "updating": "Instaluji novou verzi, StreamFinder se za chvíli znovu spustí.",
         "update_failed": "Aktualizace selhala - viz cache/logs/supervisor.log.",
+        "close_question": "Ukončit StreamFinder úplně?\n\n"
+        "Ne: poběží dál na pozadí - okno znovu otevřeš ikonou v liště (vpravo dole).",
     },
 }
 
@@ -970,9 +987,29 @@ def tray(*args: str) -> None:
         _detach([PYTHONW, os.path.abspath(__file__), "tray", "--background"])
         icon.stop()
 
+    quitting = threading.Event()
+
     def quit_app(icon) -> None:
+        quitting.set()
         stop()
         icon.stop()
+
+    def watch_window(icon) -> None:
+        """Closing the last app window asks: quit everything, or keep running in the tray."""
+        # MessageBoxW: Yes/No, question icon, in front of everything, Enter = No
+        flags = 0x4 | 0x20 | 0x100 | 0x10000 | 0x40000
+        was_open = False
+        while not quitting.is_set():
+            is_open = window_open()
+            if was_open and not is_open:
+                answer = ctypes.windll.user32.MessageBoxW(
+                    None, text["close_question"], "StreamFinder", flags
+                )
+                if answer == 6 and not quitting.is_set():  # IDYES
+                    quit_app(icon)
+                    return
+            was_open = is_open
+            time.sleep(1)
 
     in_background = lambda job: (
         lambda icon, item: threading.Thread(  # noqa: E731
@@ -1000,6 +1037,7 @@ def tray(*args: str) -> None:
     )
     if not background:
         threading.Thread(target=open_when_ready, daemon=True).start()
+    threading.Thread(target=watch_window, args=(icon,), daemon=True).start()
     try:
         icon.run()
     finally:
