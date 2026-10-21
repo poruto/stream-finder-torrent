@@ -630,6 +630,13 @@ class Transcriber:
                     "model": chat_model,
                     "temperature": 0.2,
                     "response_format": {"type": "json_object"},
+                    # gpt-oss thinks first, which uses up most of a free Groq
+                    # account's tokens a minute: subtitles don't need much of it.
+                    **(
+                        {"reasoning_effort": "low"}
+                        if chat_model.startswith("openai/gpt-oss")
+                        else {}
+                    ),
                     "messages": [
                         {"role": "system", "content": prompt},
                         {

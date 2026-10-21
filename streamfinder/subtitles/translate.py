@@ -7,15 +7,21 @@ Two engines, picked per request:
 """
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+
+from .transcribe import TranscribeError
 
 logger = logging.getLogger(__name__)
 
 GOOGLE_URL = "https://translate.googleapis.com/translate_a/single"
 GOOGLE_BATCH = 4000  # characters per request
 AI_BATCH = 40  # lines per request
+# Groq's free tier allows ~8000 tokens a minute, a whole film needs a few minutes of
+# them: an AI translation waits out the limit this long, then Google does the rest.
+AI_PATIENCE = 300
 
 
 class TranslateError(Exception):
@@ -45,7 +51,8 @@ class Translator:
             if not self.transcriber or not self.transcriber.chat_available:
                 raise TranslateError("AI translation needs a Groq or OpenAI key")
             batches = [lines[i : i + AI_BATCH] for i in range(0, len(lines), AI_BATCH)]
-            work = lambda batch: self.transcriber.translate(batch, target)
+            deadline = time.monotonic() + AI_PATIENCE
+            work = lambda batch: self._ai(batch, target, deadline)
         else:
             batches = _batches(lines, GOOGLE_BATCH)
             work = lambda batch: self._google(batch, target)
@@ -56,6 +63,24 @@ class Translator:
         except Exception as e:  # network errors, the AI engine's own errors
             raise TranslateError(str(e)) from None
         return [line for batch in results for line in batch]
+
+    def _ai(self, lines: list[str], target: str, deadline: float) -> list[str]:
+        """The chat model's translation, waiting out its rate limit until `deadline`;
+        Google's when the model fails, so one bad batch doesn't lose the whole file."""
+        while True:
+            try:
+                return self.transcriber.translate(lines, target)
+            except TranscribeError as e:
+                wait = e.retry_after if e.status == 429 else None
+                if wait is not None and time.monotonic() + wait < deadline:
+                    time.sleep(wait)
+                    continue
+                logger.warning(
+                    "AI translation failed (%s): Google Translate for %d lines",
+                    e,
+                    len(lines),
+                )
+                return self._google(lines, target)
 
     def _google(self, lines: list[str], target: str) -> list[str]:
         try:

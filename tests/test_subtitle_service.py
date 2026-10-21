@@ -494,15 +494,50 @@ def test_ai_engine_needs_a_chat_model_and_batches_by_lines():
     assert sorted(chat.sizes) == [15, 40, 40]
 
 
-def test_ai_engine_errors_become_translate_errors():
+def test_ai_engine_failure_falls_back_to_google_for_that_batch(monkeypatch):
     class Chat:
         chat_available = True
 
         def translate(self, batch, target):
-            raise TranscribeError("translation returned a different number of lines")
+            if batch[0] == "40":
+                raise TranscribeError(
+                    "translation returned a different number of lines"
+                )
+            return [f"ai:{t}" for t in batch]
 
-    with pytest.raises(TranslateError, match="different number"):
-        Translator(Chat()).translate(["a"], "cs", engine="ai")
+    translator = Translator(Chat())
+    monkeypatch.setattr(
+        translator, "_google", lambda lines, target: [f"g:{t}" for t in lines]
+    )
+    out = translator.translate([str(i) for i in range(50)], "cs", engine="ai")
+    assert out[39] == "ai:39" and out[40] == "g:40" and len(out) == 50
+
+
+def test_ai_engine_waits_out_the_rate_limit(monkeypatch):
+    class Chat:
+        chat_available = True
+        calls = 0
+
+        def translate(self, batch, target):
+            self.calls += 1
+            if self.calls < 3:
+                raise TranscribeError("limit", 429, retry_after=2)
+            return [f"ai:{t}" for t in batch]
+
+    slept = []
+    monkeypatch.setattr("streamfinder.subtitles.translate.time.sleep", slept.append)
+    assert Translator(Chat()).translate(["a"], "cs", engine="ai") == ["ai:a"]
+    assert slept == [2, 2]
+
+    # A limit that resets only after the patience runs out: Google, no waiting.
+    class Exhausted(Chat):
+        def translate(self, batch, target):
+            raise TranscribeError("limit", 429, retry_after=3600)
+
+    translator = Translator(Exhausted())
+    monkeypatch.setattr(translator, "_google", lambda lines, target: ["g"] * len(lines))
+    assert translator.translate(["a"], "cs", engine="ai") == ["g"]
+    assert slept == [2, 2]
 
 
 # -- AI subtitles: whisper output -> lines ----------------------------------------------------------
@@ -659,6 +694,25 @@ def test_ai_translation_must_keep_the_line_count(monkeypatch):
     answer.data = {"choices": [{"message": {"content": "not json"}}]}
     with pytest.raises(TranscribeError, match="no lines"):
         t.translate(["Hi"], "cs")
+
+
+def test_ai_translation_keeps_gpt_oss_reasoning_low(monkeypatch):
+    t = Transcriber(_FakeTranscoder(), "gsk_key")
+    sent = []
+    answer = ChatAnswer(
+        data={"choices": [{"message": {"content": '{"lines": ["Ahoj"]}'}}]}
+    )
+
+    def post(url, json, **kwargs):
+        sent.append(json)
+        return answer
+
+    monkeypatch.setattr(t.session, "post", post)
+    for model in ("openai/gpt-oss-120b", "gpt-4o-mini"):
+        monkeypatch.setattr(t, "chat_model", lambda model=model: model)
+        t.translate(["Hi"], "cs")
+    assert sent[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in sent[1]  # OpenAI's chat models refuse it
 
 
 def test_ai_translation_without_chat_model_is_501(monkeypatch):
